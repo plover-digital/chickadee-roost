@@ -4,8 +4,9 @@ Roost is the service layer behind `chickadee.run`: GitHub App sign-in,
 repository/organization onboarding, approved runner-queue selection, applied
 status, and basic usage graphs. Runner execution remains in Chickadee.
 
-This repository is being extracted from the working one-host beta. It does not
-yet implement a multi-host scheduler, worker RPC, billing, or a production
+The web module and operator bridge have been extracted into this public
+repository from the working one-host beta. This boundary change does not implement
+a multi-host scheduler, worker RPC, billing, or a production
 hostile-tenant isolation boundary. See the
 [host fleet proposal](https://github.com/plover-digital/chickadee/blob/main/docs/multi-host.md).
 
@@ -14,7 +15,7 @@ hostile-tenant isolation boundary. See the
 | Repository | Responsibility | Visibility |
 | --- | --- | --- |
 | [Chickadee](https://github.com/plover-digital/chickadee) | Standalone Linux host controller, QEMU/KVM lifecycle, guest bootstrap, image builders, local recovery and resource limits | Public |
-| Chickadee Roost | GitHub authentication, customer onboarding, service policy, desired/applied queue status and usage presentation | Public |
+| [Chickadee Roost](https://github.com/plover-digital/chickadee-roost) | GitHub authentication, customer onboarding, service policy, desired/applied queue status and usage presentation | Public |
 | Operator deployment repository | Host/cloud inventory, deployment automation, configuration, rollout and incident notes | Private |
 
 Someone can clone Chickadee and operate their own runners without Roost or a
@@ -56,7 +57,7 @@ Equivalent checks are `go test -race ./...` and
 `python3 -m unittest discover -s scripts -p 'test_*.py'`. Tests use synthetic
 GitHub responses and private temporary files, not live customer accounts.
 
-During extraction, the executable remains `chickadee-web`. The existing
+For deployment compatibility, the executable remains `chickadee-web`. The existing
 `CHICKADEE_*` environment variables, `chickadee-web` service account/unit,
 `/var/lib/chickadee-web` state directory, and `admin.sock` location are retained
 so operators can migrate the binary without silently changing their deployment.

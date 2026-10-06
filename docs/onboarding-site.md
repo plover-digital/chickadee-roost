@@ -1,9 +1,10 @@
 # Optional GitHub App onboarding site
 
-The Go website in `cmd/chickadee-web` is optional. The controller remains usable
-without it, any hosted service, or an external database. Public code includes
-the website; operator infrastructure, customer metadata and credentials remain
-outside this repository.
+The Go website in this repository’s `cmd/chickadee-web` is optional. The
+[Chickadee host controller](https://github.com/plover-digital/chickadee) remains
+usable without Roost, a hosted service, or an external database. This public
+repository contains the website and operator bridge; deployed infrastructure,
+customer metadata and credentials remain outside it.
 
 ## App settings
 
@@ -42,6 +43,14 @@ CHICKADEE_OAUTH_SECRET_FILE=/etc/chickadee-web/oauth-client-secret
 CHICKADEE_WEB_STATE=/var/lib/chickadee-web
 ```
 
+A portable [systemd unit](../deploy/chickadee-web.service) is included. Create a
+dedicated `chickadee-web` system user, install `bin/chickadee-web` at
+`/usr/local/bin/chickadee-web`, and place these settings in a root-owned
+`/etc/chickadee-web/site.env` readable only by root and that service group
+(mode 0640). Install the unit under `/etc/systemd/system/`, run
+`systemctl daemon-reload`, then enable `chickadee-web`. Configure your HTTPS
+reverse proxy separately; the unit does not change host networking.
+
 The secret must be a regular mode-0600 file readable by the web service account.
 The state directory must be dedicated and private (0700). Enrollment metadata
 is written atomically to a mode-0600 local JSON file. Back it up privately;
@@ -62,7 +71,7 @@ Origin checks, and stores no OAuth credentials on disk.
 
 **A pending request does not create runners or change controller config.** The
 first hosted beta requires operator admission and a configured GitHub scope.
-Use `examples/scopes.json` to serve multiple authorized org/repo scopes in one
+Use Chickadee’s [scope example](https://github.com/plover-digital/chickadee/blob/main/examples/scopes.json) to serve multiple authorized org/repo scopes in one
 controller. Each scope has independent scale sets and JIT credentials while
 sharing the host CPU, memory, concurrency and TAP budgets. Never launch multiple
 independent controllers against shared TAPs. Personal repos need repository-scoped

@@ -1,7 +1,7 @@
 # Working in Chickadee Roost
 
-Roost owns the managed-service experience and coordination. Chickadee owns
-standalone host execution. Private operator repositories own deployed inventory,
+This is the public Chickadee Roost repository. Roost owns the managed-service
+experience and coordination. Chickadee owns standalone host execution. Private operator repositories own deployed inventory,
 credentials, and operational configuration. Keep these boundaries visible in
 code, documentation, issues, and pull requests.
 
@@ -19,7 +19,8 @@ code, documentation, issues, and pull requests.
 - Keep operator deployment details in private operations repositories. Public
   examples must use placeholders and contain no customer/host inventory.
 
-The current single-host bridge is transitional. Its Python helpers and private
+The standalone web-module extraction is complete. The current single-host
+bridge is transitional. Its Python helpers and private
 Unix admin JSON contract may remain during migration; document changes to their
 compatibility rather than pretending they are a new multi-host worker protocol.
 

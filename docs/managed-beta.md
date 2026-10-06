@@ -1,6 +1,7 @@
 # Optional managed beta
 
-The public controller remains self-hostable without this website or service.
+The [public Chickadee host controller](https://github.com/plover-digital/chickadee)
+remains self-hostable without Roost or this service.
 A hosted operator can use the optional site and reconciler on separate hosts.
 No App private key is placed on the web host; only the OAuth client secret.
 
