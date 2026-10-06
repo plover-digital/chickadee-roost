@@ -64,8 +64,13 @@ func (b *Broker) Sync(ctx context.Context, demands []Demand, workers map[string]
 	eligibleDemand := map[string]Demand{}
 	seen := map[string]bool{}
 	for _, d := range demands {
-		if d.QueueID == "" || d.ScopeURL == "" || d.Label == "" || d.Assigned < 0 || !validProfile(d.Profile) || seen[d.QueueID] || d.Revision == 0 || d.ScopeMax < 0 || d.ScopeMax > 32 {
+		if d.QueueID == "" || d.ScopeURL == "" || d.Label == "" || d.Assigned < 0 || !validProfile(d.Profile) || seen[d.QueueID] || d.Revision == 0 || d.ScopeMax < 0 || d.ScopeMax > 32 || len(d.CompletedRunners) > 4096 {
 			return errors.New("invalid fleet demand")
+		}
+		for _, name := range d.CompletedRunners {
+			if len(name) > 128 {
+				return errors.New("invalid runner completion metadata")
+			}
 		}
 		seen[d.QueueID] = true
 		if d.Assigned > 0 {
@@ -81,6 +86,21 @@ func (b *Broker) Sync(ctx context.Context, demands []Demand, workers map[string]
 		}
 	}
 	changed := false
+	for _, d := range demands {
+		for i, a := range b.assignments {
+			if a.QueueID != d.QueueID {
+				continue
+			}
+			for _, name := range d.CompletedRunners {
+				if name == a.RunnerName && (a.GitHubCompletedRevision == 0 || d.Revision < a.GitHubCompletedRevision) {
+					b.assignments[i].GitHubCompletedRevision = d.Revision
+					changed = true
+					break
+				}
+			}
+		}
+	}
+
 	for i, a := range b.assignments {
 		if a.Phase == Complete {
 			if a.CredentialUncertain && time.Since(a.CompletedAt) <= 10*time.Minute && time.Since(a.RegistrationCheckedAt) >= 30*time.Second {
@@ -326,7 +346,7 @@ func (b *Broker) queueCount(queue string) int {
 func (b *Broker) completedCredits(queue string, revision uint64) int {
 	n := 0
 	for _, a := range b.assignments {
-		if a.Phase == Complete && a.QueueID == queue && a.DemandRevision <= revision && a.LastDemandRevision >= revision {
+		if a.Phase == Complete && a.QueueID == queue && a.DemandRevision <= revision && a.LastDemandRevision >= revision && (a.GitHubCompletedRevision == 0 || a.GitHubCompletedRevision > revision) {
 			n++
 		}
 	}

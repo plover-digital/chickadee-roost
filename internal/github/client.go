@@ -13,8 +13,10 @@ import (
 )
 
 type Client struct {
-	API   *scaleset.Client
-	SetID int
+	API     *scaleset.Client
+	SetID   int
+	GroupID int
+	SetName string
 }
 
 // Actions cache archives paths relative to GITHUB_WORKSPACE. Match the hosted
@@ -69,7 +71,7 @@ func newClient(ctx context.Context, c dispatch.Queue, create bool) (*Client, err
 	if !set.RunnerSetting.DisableUpdate {
 		return nil, fmt.Errorf("existing scale set must disable runner auto-update")
 	}
-	return &Client{API: api, SetID: set.ID}, nil
+	return &Client{API: api, SetID: set.ID, GroupID: c.RunnerGroupID, SetName: c.ScaleSet}, nil
 }
 func (c *Client) JIT(ctx context.Context, name string) (string, error) {
 	j, e := c.API.GenerateJitRunnerConfig(ctx, &scaleset.RunnerScaleSetJitRunnerSetting{Name: name, WorkFolder: runnerWorkFolder}, c.SetID)
@@ -126,7 +128,56 @@ type messageSession interface {
 	DeleteMessage(context.Context, int) error
 }
 
+type DemandStatistics struct {
+	Assigned         int
+	CompletedRunners []string
+}
+
+func (c *Client) Statistics(ctx context.Context) (DemandStatistics, error) {
+	set, err := c.API.GetRunnerScaleSet(ctx, c.GroupID, c.SetName)
+	if err != nil || set == nil || set.ID != c.SetID || set.Statistics == nil {
+		return DemandStatistics{}, fmt.Errorf("scale-set statistics unavailable")
+	}
+	return DemandStatistics{Assigned: maxInt(0, set.Statistics.TotalAssignedJobs)}, nil
+}
+func (c *Client) PollStatistics(ctx context.Context, owner string, max int, desired chan<- DemandStatistics) error {
+	session, err := c.API.MessageSessionClient(ctx, c.SetID, owner)
+	if err != nil {
+		return fmt.Errorf("message session creation failed")
+	}
+	defer func() {
+		closeCtx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+		defer cancel()
+		_ = session.Close(closeCtx)
+	}()
+	emit := func(s DemandStatistics) error {
+		select {
+		case desired <- s:
+			return nil
+		case <-ctx.Done():
+			return ctx.Err()
+		}
+	}
+	n := 0
+	if stats := session.Session().Statistics; stats != nil {
+		n = stats.TotalAssignedJobs
+	}
+	if err = emit(DemandStatistics{Assigned: min(max, maxInt(0, n))}); err != nil {
+		return err
+	}
+	return pollMessagesStats(ctx, session, max, emit)
+}
 func pollMessages(ctx context.Context, session messageSession, max int, desired chan<- int) error {
+	return pollMessagesStats(ctx, session, max, func(s DemandStatistics) error {
+		select {
+		case desired <- s.Assigned:
+			return nil
+		case <-ctx.Done():
+			return ctx.Err()
+		}
+	})
+}
+func pollMessagesStats(ctx context.Context, session messageSession, max int, emit func(DemandStatistics) error) error {
 	last := 0
 	for {
 		m, e := session.GetMessage(ctx, last, max)
@@ -148,10 +199,14 @@ func pollMessages(ctx context.Context, session messageSession, max int, desired 
 			ids = append(ids, j.RunnerRequestID)
 		}
 		if m.Statistics != nil {
-			select {
-			case desired <- min(max, maxInt(0, m.Statistics.TotalAssignedJobs)):
-			case <-ctx.Done():
-				return ctx.Err()
+			stats := DemandStatistics{Assigned: min(max, maxInt(0, m.Statistics.TotalAssignedJobs))}
+			for _, j := range m.JobCompletedMessages {
+				if j != nil && j.RunnerName != "" && len(j.RunnerName) <= 100 && len(stats.CompletedRunners) < 50 {
+					stats.CompletedRunners = append(stats.CompletedRunners, j.RunnerName)
+				}
+			}
+			if err := emit(stats); err != nil {
+				return err
 			}
 		}
 		// Statistics already describe owned demand. Let warm provisioning overlap

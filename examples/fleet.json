@@ -14,9 +14,9 @@
   "workers": [
     {
       "endpoint": "https://127.0.0.1:18443",
-      "server_name": "worker-1.chickadee.internal",
+      "server_name": "worker-one.chickadee.internal",
       "identity": {
-        "worker_id": "worker-1",
+        "worker_id": "worker-one",
         "broker_id": "roost",
         "generation": 1
       },

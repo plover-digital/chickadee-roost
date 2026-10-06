@@ -58,6 +58,7 @@ type Backend interface {
 	Remove(context.Context, string) error
 }
 type Demand struct {
+	CompletedRunners         []string
 	ScopeMax                 int
 	QueueID, ScopeURL, Label string
 	Profile                  Profile
@@ -66,6 +67,7 @@ type Demand struct {
 }
 type Limits struct{ MaxVMs, MaxCPUs, MaxMemoryMiB int }
 type Assignment struct {
+	GitHubCompletedRevision                  uint64
 	CredentialUncertain                      bool
 	RegistrationCheckedAt                    time.Time
 	ReservedAt, CompletedAt                  time.Time

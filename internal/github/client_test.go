@@ -113,3 +113,19 @@ func TestAvailabilityDoesNotBecomeAssignedDemand(t *testing.T) {
 		t.Fatal("poll failed to stop")
 	}
 }
+
+func TestCompletionMetadataDoesNotBecomeDemand(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	s := &delayedSession{message: &scaleset.RunnerScaleSetMessage{Statistics: &scaleset.RunnerScaleSetStatistic{TotalAssignedJobs: 1}, JobCompletedMessages: []*scaleset.JobCompleted{{RunnerName: "chickadee-old"}}}, acquiring: make(chan []int64, 1), release: make(chan struct{})}
+	err := pollMessagesStats(ctx, s, 2, func(stats DemandStatistics) error {
+		if stats.Assigned != 1 || !reflect.DeepEqual(stats.CompletedRunners, []string{"chickadee-old"}) {
+			t.Fatalf("bad statistics/lifecycle separation: %#v", stats)
+		}
+		cancel()
+		return ctx.Err()
+	})
+	if err == nil {
+		t.Fatal("cancellation lost")
+	}
+}

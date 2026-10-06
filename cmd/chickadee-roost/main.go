@@ -36,6 +36,7 @@ type update struct {
 	key        string
 	n          int
 	generation uint64
+	completed  []string
 }
 
 func main() {
@@ -144,20 +145,43 @@ func run(path string, c dispatch.FleetConfig) error {
 		polls[q.Key] = poller{q, client, stop, done}
 		backends[q.Key] = client
 		go func() {
-			defer close(done)
-			out := make(chan int, 16)
+			refreshDone := make(chan struct{})
+			go func() {
+				defer close(refreshDone)
+				ticker := time.NewTicker(30 * time.Second)
+				defer ticker.Stop()
+				for {
+					select {
+					case <-pc.Done():
+						return
+					case <-ticker.C:
+						sc, stop := context.WithTimeout(pc, 5*time.Second)
+						stats, err := client.Statistics(sc)
+						stop()
+						if err == nil {
+							select {
+							case values <- update{key: q.Key, n: stats.Assigned, generation: g}:
+							case <-pc.Done():
+								return
+							}
+						}
+					}
+				}
+			}()
+			defer func() { stop(); <-refreshDone; close(done) }()
+			out := make(chan github.DemandStatistics, 16)
 			finished := make(chan struct{})
 			go func() {
 				defer close(finished)
 				delay := 2 * time.Second
 				for pc.Err() == nil {
-					_ = client.Poll(pc, q.Label, q.Max, out)
+					_ = client.PollStatistics(pc, q.Label, q.Max, out)
 					if pc.Err() != nil {
 						return
 					}
 					slog.Warn("Queue listener retry; existing worker jobs preserved")
 					select {
-					case out <- 0:
+					case out <- github.DemandStatistics{}:
 					case <-pc.Done():
 						return
 					}
@@ -175,7 +199,7 @@ func run(path string, c dispatch.FleetConfig) error {
 				select {
 				case n := <-out:
 					select {
-					case values <- update{q.Key, n, g}:
+					case values <- update{key: q.Key, n: n.Assigned, generation: g, completed: n.CompletedRunners}:
 					case <-pc.Done():
 						<-finished
 						return
@@ -285,6 +309,10 @@ func run(path string, c dispatch.FleetConfig) error {
 			d.Label = q.Label
 			d.ScopeMax = q.ScopeMax
 			d.Assigned = max(0, min(v.n, q.Max))
+			d.CompletedRunners = append(d.CompletedRunners, v.completed...)
+			if len(d.CompletedRunners) > 256 {
+				d.CompletedRunners = d.CompletedRunners[len(d.CompletedRunners)-256:]
+			}
 			d.Profile = fleet.Profile{Digest: q.ImageDigest, Machine: q.Machine, CPUs: q.CPUs, MemoryMiB: q.MemoryMiB, DiskGiB: q.DiskGiB}
 			demands[v.key] = d
 		case <-tick.C:
@@ -296,6 +324,10 @@ func run(path string, c dispatch.FleetConfig) error {
 			}
 			if e = broker.Sync(ctx, ds, workers, backends); e != nil {
 				slog.Warn("Fleet reconciliation deferred; uncertain capacity retained")
+			}
+			for key, d := range demands {
+				d.CompletedRunners = nil
+				demands[key] = d
 			}
 			assignments := broker.Assignments()
 			for _, a := range assignments {

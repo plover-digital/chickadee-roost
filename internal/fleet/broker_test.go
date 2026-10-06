@@ -516,3 +516,55 @@ func TestActiveDemandResumesCompatibleReservedIntent(t *testing.T) {
 		t.Fatal("valid reserved intent did not resume")
 	}
 }
+
+func TestGithubCompletionReleasesSnapshotCreditForNewPendingJob(t *testing.T) {
+	b, w, backend, d := fixture(t)
+	workers := map[string]Worker{"worker-a": w}
+	backends := map[string]Backend{d.QueueID: backend}
+	if e := b.Sync(context.Background(), []Demand{d}, workers, backends); e != nil {
+		t.Fatal(e)
+	}
+	old := b.assignments[0]
+	// GitHub has completed the old runner's job and reports one NEW pending job,
+	// while the old VM still needs process/disk cleanup.
+	d.Revision = 2
+	d.CompletedRunners = []string{old.RunnerName}
+	if e := b.Sync(context.Background(), []Demand{d}, workers, backends); e != nil {
+		t.Fatal(e)
+	}
+	if w.reserve != 1 {
+		t.Fatal("scope quota released before worker cleanup")
+	}
+	record := w.records[old.ID]
+	record.State = "terminal"
+	record.CompletedAt = time.Now().UTC()
+	w.records[old.ID] = record
+	if e := b.Sync(context.Background(), []Demand{d}, workers, backends); e != nil {
+		t.Fatal(e)
+	}
+	if w.reserve != 2 || b.assignments[0].GitHubCompletedRevision != 2 {
+		t.Fatal("old completed runner consumed the new job snapshot")
+	}
+	if e := b.Sync(context.Background(), []Demand{d}, workers, backends); e != nil {
+		t.Fatal(e)
+	}
+	if w.reserve != 2 {
+		t.Fatal("same pending snapshot allocated twice")
+	}
+}
+func TestRunnerCompletionMetadataCannotCrossQueue(t *testing.T) {
+	b, w, backend, d := fixture(t)
+	workers := map[string]Worker{"worker-a": w}
+	backends := map[string]Backend{d.QueueID: backend}
+	_ = b.Sync(context.Background(), []Demand{d}, workers, backends)
+	name := b.assignments[0].RunnerName
+	other := d
+	other.QueueID = "other"
+	other.Assigned = 0
+	other.Revision = 2
+	other.CompletedRunners = []string{name}
+	_ = b.Sync(context.Background(), []Demand{d, other}, workers, backends)
+	if b.assignments[0].GitHubCompletedRevision != 0 {
+		t.Fatal("completion metadata crossed queue boundary")
+	}
+}
