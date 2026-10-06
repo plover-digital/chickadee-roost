@@ -322,7 +322,38 @@ func workerCapacity(s Inventory, p Profile) bool {
 	if u.VMs < 0 || u.CPUs < 0 || u.MemoryMiB < 0 {
 		return false
 	}
-	return u.VMs+1 <= s.Budget.MaxVMs && u.CPUs+p.CPUs <= s.Budget.MaxCPUs && u.MemoryMiB+p.MemoryMiB <= s.Budget.MaxMemoryMiB
+	fits := func(v CapacityUsed) bool {
+		return v.VMs+1 <= s.Budget.MaxVMs && v.CPUs+p.CPUs <= s.Budget.MaxCPUs && v.MemoryMiB+p.MemoryMiB <= s.Budget.MaxMemoryMiB
+	}
+	if fits(u) {
+		return true
+	}
+	// This is placement eligibility, not resource release. The worker must retire
+	// these credential-free READY guests and confirm exit/disk cleanup before
+	// allocating the cold VM. Booting and journaled reservations are never reclaimed.
+	reclaim := map[Profile]int{}
+	for _, available := range s.Profiles {
+		if available.Ready < 0 || available.Booting < 0 {
+			return false
+		}
+		if available.Ready == 0 || sameProfile(available.Profile, p) || !validProfile(available.Profile) {
+			continue
+		}
+		key := available.Profile
+		key.ID = "" // Aliases can describe the same physical pool.
+		if available.Ready > reclaim[key] {
+			reclaim[key] = available.Ready
+		}
+	}
+	for profile, count := range reclaim {
+		u.VMs -= count
+		u.CPUs -= count * profile.CPUs
+		u.MemoryMiB -= count * profile.MemoryMiB
+	}
+	if u.VMs < 0 || u.CPUs < 0 || u.MemoryMiB < 0 {
+		return false
+	}
+	return fits(u)
 }
 func (b *Broker) scopeCount(scope string) int {
 	n := 0
