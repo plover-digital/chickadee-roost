@@ -1,0 +1,8 @@
+/bin/
+/build/
+/runtime/
+*.pem
+*.key
+*.env
+.env*
+__pycache__/
