@@ -20,6 +20,8 @@ github.com/mattn/go-isatty v0.0.20 h1:xfD0iDuEKnDkl03q4limB+vH+GxLEtL/jb4xVJSWWE
 github.com/mattn/go-isatty v0.0.20/go.mod h1:W+V8PltTTMOvKvAeJH7IuucS94S2C6jfK/D7dTCTo3Y=
 github.com/plover-digital/chickadee v0.0.0-20261006231304-5a79413ecd1c h1:0bM1Odz8QFRrWUXq8LG763i8dx1EuuSVCHwecO9pplU=
 github.com/plover-digital/chickadee v0.0.0-20261006231304-5a79413ecd1c/go.mod h1:z8H6gTskPEoIBTVZFvnlp4RIPMgovDSR6o7KWvpM1k0=
+github.com/plover-digital/chickadee v0.0.0-20261006234207-bd08fc7886d6 h1:VLPWRYS30S6AJKrv/7MYjP1/nC5C5c2beZ6ckDK7Csw=
+github.com/plover-digital/chickadee v0.0.0-20261006234207-bd08fc7886d6/go.mod h1:z8H6gTskPEoIBTVZFvnlp4RIPMgovDSR6o7KWvpM1k0=
 github.com/pmezard/go-difflib v1.0.1-0.20181226105442-5d4384ee4fb2 h1:Jamvg5psRIccs7FGNTlIRMkT8wgtp5eCXdBlqhYGL6U=
 github.com/pmezard/go-difflib v1.0.1-0.20181226105442-5d4384ee4fb2/go.mod h1:iKH77koFhYxTK1pcRnkKkqfTogsbg7gZNVY4sRDYZ/4=
 github.com/stretchr/testify v1.11.1 h1:7s2iGBzp5EwR7/aIZr8ao5+dra3wiQyKjjFuvgVKu7U=

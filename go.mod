@@ -4,7 +4,7 @@ go 1.25.3
 
 require (
 	github.com/actions/scaleset v0.4.0
-	github.com/plover-digital/chickadee v0.0.0-20261006231304-5a79413ecd1c
+	github.com/plover-digital/chickadee v0.0.0-20261006234207-bd08fc7886d6
 )
 
 require (
