@@ -16,7 +16,11 @@ def requested_profiles(c, request):
         raise ValueError('requested queue is not in the host profile catalog')
     selected=['chickadee']+list(dict.fromkeys(q for q in queues if q!='chickadee'))
     profiles={q:copy.deepcopy(template[q]) for q in selected}
-    for profile in profiles.values():profile['warm_pool']=0
+    maximum=request.get('max_vms',1)
+    if type(maximum)!=int or maximum<1 or maximum>c['limits']['max_vms']:raise ValueError('invalid scope concurrency limit')
+    for profile in profiles.values():
+        profile['warm_pool']=0
+        profile['max_vms']=min(profile['max_vms'],maximum)
     return profiles
 
 def proposed(c, request, installation, repo, group_id):
@@ -40,15 +44,45 @@ def proposed(c, request, installation, repo, group_id):
     result['scopes'][('org-' if installation['account']['type']=='Organization' else 'repo-')+str(installation['account']['id'] if installation['account']['type']=='Organization' else repo['id'])]={'github_url':url,'app_installation_id':installation['id'],'runner_group_id':group_id,'profiles':profiles,'max_vms':request.get('max_vms',1)}
     return result
 
+def validate_installation_identity(installation, request):
+    account=installation['account'];expected=request['account']
+    identities=(installation.get('id'),request.get('installation_id'),account.get('id'),expected.get('id'),request.get('user',{}).get('id'))
+    if any(type(value)!=int or value<=0 for value in identities):raise ValueError('invalid immutable installation/account/user identity')
+    if installation.get('id')!=request['installation_id'] or account['id']!=expected['id'] or account['type']!=expected['type']:
+        raise ValueError('installation account identity changed')
+    if account['type']=='User' and account['id']!=request['user']['id']:
+        raise ValueError('personal admission requires the immutable repository owner')
+
+
+def validate_owned_scope(scope, installation):
+    if scope.get('app_installation_id')!=installation['id']:
+        raise ValueError('existing scope installation changed; operator recovery required')
+
+
+def current_repository_admin(request, token):
+    """Metadata-read installation token; match immutable identity, not login alone."""
+    user=request['user'];repo=request['repository']['full_name']
+    login=user.get('login','')
+    if not isinstance(login,str) or not re.fullmatch(r'[A-Za-z0-9-]{1,39}',login):return False
+    if not re.fullmatch(r'[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+',repo):return False
+    try:
+        permission=setup.api('/repos/'+repo+'/collaborators/'+login+'/permission',token=token)
+    except RuntimeError as error:
+        if str(error) in ('GitHub setup API returned HTTP 404','GitHub setup API returned HTTP 403'):return False
+        raise
+    return permission.get('permission')=='admin' and type(permission.get('user',{}).get('id'))==int and permission['user']['id']==user['id']
+
+
 def validate_repository_only_selection(selected, repository_id):
     if selected['total_count']!=1 or {r['id'] for r in selected['repositories']}!={repository_id}:
         raise ValueError('repository-only approval cannot broaden access for other selected repositories')
 
-def runner_group_plan(name, repo, ref, repository_only=False):
-    if repository_only and not repo['private']:
+def runner_group_plan(name, repo, ref, repository_only=False, allow_public_repository=False):
+    if allow_public_repository and not repository_only:raise ValueError('public repository flag requires repository-only approval')
+    if repository_only and not repo['private'] and not allow_public_repository:
         raise ValueError('repository-only access requires the explicitly approved private repository')
     return {'name':name,'visibility':'selected','selected_repository_ids':[repo['id']],
-            'allows_public_repositories':False if repository_only else not repo['private'],
+            'allows_public_repositories':not repo['private'],
             'restricted_to_workflows':not repository_only,
             'selected_workflows':[] if repository_only else [ref]}
 
@@ -57,6 +91,8 @@ def main():
     p.add_argument('--config',required=True);p.add_argument('--request',required=True);p.add_argument('--output',required=True)
     p.add_argument('--trusted-workflows',action='store_true',help='operator has reviewed beta trust and workflow policy')
     p.add_argument('--repository-only',action='store_true',help='explicit operator approval for every workflow in the one selected private organization repository')
+    p.add_argument('--require-current-admin',action='store_true',help='revalidate authenticated organization requester admin rights before group mutation')
+    p.add_argument('--allow-public-repository',action='store_true',help='explicit approval for the exact selected public repository, with --repository-only')
     p.add_argument('--workflow',default='.github/workflows/chickadee.yml',help='main-branch workflow allowed for org groups')
     p.add_argument('--queue',action='append',help='explicit additional queue; repeat as needed (default: chickadee only)')
     args=p.parse_args()
@@ -71,6 +107,7 @@ def main():
     jwt=setup.app_jwt(c['app_client_id'],pathlib.Path(c['app_key_file']))
     installation=setup.api('/app/installations/'+str(iid),token=jwt)
     if installation.get('suspended_at'):raise ValueError('installation suspended')
+    validate_installation_identity(installation,request)
     account=installation['account']
     if account['type'] not in ('User','Organization'):raise ValueError('unsupported account type')
     needed='organization_self_hosted_runners' if account['type']=='Organization' else 'administration'
@@ -88,8 +125,11 @@ def main():
         raise ValueError('request identity no longer matches GitHub')
     if account['type']=='User' and account['id']!=request['user']['id']:
         raise ValueError('personal beta admission requires the repository owner')
-    if args.repository_only and (account['type']!='Organization' or not repo['private']):
+    if args.allow_public_repository and not args.repository_only:raise ValueError('public repository flag requires repository-only approval')
+    if args.repository_only and (account['type']!='Organization' or (not repo['private'] and not args.allow_public_repository)):
         raise ValueError('repository-only access requires an approved private organization repository')
+    if args.require_current_admin and account['type']=='Organization' and not current_repository_admin(request,token):
+        raise ValueError('requester must currently administer the selected repository')
     group_id=1
     if account['type']=='Organization':
         org=account['login'];base='/orgs/'+org+'/actions/runner-groups'
@@ -97,19 +137,22 @@ def main():
         if not scopes:scopes={'primary':{'github_url':c['github_url'],'runner_group_id':c['runner_group_id']}}
         own=next((scope for scope in scopes.values() if scope['github_url'].lower().rstrip('/')==('https://github.com/'+org).lower()),None)
         ref=repo['full_name']+'/'+args.workflow+'@refs/heads/main'
+        if own is not None:
+            if own is scopes.get('primary'):raise ValueError('customer admission cannot mutate operator primary scope')
+            validate_owned_scope(own,installation)
         if own is None:
             # Do not adopt/mutate an unrelated group by its name on retry.
             name='chickadee-'+str(installation['app_id'])+'-'+str(iid)
             groups=setup.api(base+'?per_page=100',token=token)
             if any(g['name']==name for g in groups['runner_groups']):raise ValueError('group already exists; recover its ownership/config before retrying')
-            group=setup.api(base,'POST',token,runner_group_plan(name,repo,ref,args.repository_only))
+            group=setup.api(base,'POST',token,runner_group_plan(name,repo,ref,args.repository_only,args.allow_public_repository))
         else:
             group=setup.api(base+'/'+str(own['runner_group_id']),token=token)
             if group['visibility']!='selected':raise ValueError('existing group must restrict repositories')
             if args.repository_only:
                 selected=setup.api(base+'/'+str(group['id'])+'/repositories?per_page=100',token=token)
                 validate_repository_only_selection(selected,rid)
-                group=setup.api(base+'/'+str(group['id']),'PATCH',token,{'restricted_to_workflows':False,'selected_workflows':[],'allows_public_repositories':False})
+                group=setup.api(base+'/'+str(group['id']),'PATCH',token,{'restricted_to_workflows':False,'selected_workflows':[],'allows_public_repositories':not repo['private']})
             else:
                 if not group.get('restricted_to_workflows'):raise ValueError('existing repository-only group requires explicit repository-only policy')
                 refs=set(group['selected_workflows']);refs.add(ref)

@@ -8,5 +8,7 @@
   },
   "repository_workflow_access": {},
   "managed_requests": [],
-  "workflow": ".github/workflows/ci.yaml"
+  "workflow": ".github/workflows/ci.yaml",
+  "auto_approve_authenticated": true,
+  "auto_repository_workflows": true
 }

@@ -18,7 +18,7 @@ import (
 
 func main() {
 	id, _ := strconv.ParseInt(os.Getenv("CHICKADEE_APP_ID"), 10, 64)
-	c := site.Config{PublicURL: env("CHICKADEE_PUBLIC_URL", "http://127.0.0.1:8080"), AppSlug: env("CHICKADEE_APP_SLUG", "chickadee-run"), ClientID: os.Getenv("CHICKADEE_APP_CLIENT_ID"), AppID: id, StateDir: env("CHICKADEE_WEB_STATE", "/var/lib/chickadee-web")}
+	c := site.Config{PublicURL: env("CHICKADEE_PUBLIC_URL", "http://127.0.0.1:8080"), AppSlug: env("CHICKADEE_APP_SLUG", "chickadee-run"), ClientID: os.Getenv("CHICKADEE_APP_CLIENT_ID"), AppID: id, AutomaticActivation: os.Getenv("CHICKADEE_AUTOMATIC_ACTIVATION") == "1", StateDir: env("CHICKADEE_WEB_STATE", "/var/lib/chickadee-web")}
 	if path := os.Getenv("CHICKADEE_OAUTH_SECRET_FILE"); path != "" {
 		info, e := os.Lstat(path)
 		if e != nil || !info.Mode().IsRegular() || info.Mode().Perm()&0077 != 0 {

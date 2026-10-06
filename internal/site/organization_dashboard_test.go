@@ -24,7 +24,7 @@ func TestOrganizationServicesShareOneUsageSnapshotAndHideUnverifiedRepos(t *test
 	hidden.EnabledQueues = nil
 	p := page{Title: "Your repositories", User: &User{ID: 7}, Enrollments: []Enrollment{a, b, hidden}, Choices: []Choice{{Installation: Installation{ID: 8, Account: org}, Repository: a.Repository}, {Installation: Installation{ID: 8, Account: org}, Repository: b.Repository}}}
 	services := p.Services()
-	if len(services) != 1 || len(services[0].Repositories) != 2 || services[0].UsageChart().TotalMinutes != "2.0" {
+	if len(services) != 1 || len(services[0].Repositories) != 1 || services[0].UsageChart().TotalMinutes != "2.0" {
 		t.Fatal("organization service duplicated or usage summed")
 	}
 	if len(p.SetupChoices()) != 1 {

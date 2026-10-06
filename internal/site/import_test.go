@@ -10,7 +10,7 @@ import (
 
 func TestPrivateImportDeduplicatesWithoutOverridingCustomerPause(t *testing.T) {
 	s := fixture(t)
-	body := `{"user":{"id":7,"login":"tester"},"installation_id":8,"account":{"id":7,"login":"tester","type":"User"},"repository":{"id":99,"full_name":"tester/repo"},"status":"active","queues":["chickadee"],"enabled_queues":["chickadee"]}`
+	body := `{"user":{"id":7,"login":"tester"},"installation_id":8,"account":{"id":7,"login":"tester","type":"User"},"repository":{"id":99,"full_name":"tester/repo"},"authenticated":true,"status":"active","queues":["chickadee"],"enabled_queues":["chickadee"]}`
 	post := func(body string) int {
 		w := httptest.NewRecorder()
 		s.AdminHandler().ServeHTTP(w, httptest.NewRequest("POST", "/import-enrollment", strings.NewReader(body)))
@@ -27,7 +27,7 @@ func TestPrivateImportDeduplicatesWithoutOverridingCustomerPause(t *testing.T) {
 	if post(strings.Replace(body, `"status":"active"`, `"access_token":"secret","status":"active"`, 1)) != 400 {
 		t.Fatal("credentials accepted as metadata")
 	}
-	if post(body) != 201 || len(s.enrollments) != 1 || s.enrollments[0].ID == "" {
+	if post(body) != 201 || len(s.enrollments) != 1 || s.enrollments[0].ID == "" || s.enrollments[0].Authenticated {
 		t.Fatal("verified import failed")
 	}
 	s.enrollments[0].DesiredState = "paused"

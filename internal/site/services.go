@@ -52,9 +52,20 @@ func (p page) Services() []ServiceView {
 			}
 			// Scope usage is repeated per enrollment by the relay; take one latest
 			// snapshot rather than summing it and double-counting VM minutes.
-			if service.Status == "permission-required" || entry.Updated.After(service.Updated) {
+			if service.Status == "permission-required" || organizationRank(entry) > organizationRank(service.Enrollment) || organizationRank(entry) == organizationRank(service.Enrollment) && entry.Updated.After(service.Updated) {
 				service.Enrollment = entry
 			}
+		}
+	}
+	for i := range out {
+		if out[i].Organization {
+			selected := []Repository{}
+			for _, repo := range out[i].Repositories {
+				if repo.ID == out[i].Repository.ID {
+					selected = append(selected, repo)
+				}
+			}
+			out[i].Repositories = selected
 		}
 	}
 	return out
@@ -71,7 +82,7 @@ func (p page) SetupChoices() []Choice {
 			continue
 		}
 		if index, exists := groups[choice.Installation.ID]; exists {
-			if len(out[index].SelectedQueues) == 0 && len(choice.SelectedQueues) > 0 {
+			if out[index].EnrollmentNotice != "" && choice.EnrollmentNotice == "" || len(out[index].SelectedQueues) == 0 && len(choice.SelectedQueues) > 0 && choice.EnrollmentNotice == "" {
 				out[index] = choice
 			}
 			continue

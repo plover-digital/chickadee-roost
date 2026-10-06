@@ -10,7 +10,7 @@ No App private key is placed on the web host; only the OAuth client secret.
 1. Continue with GitHub, then install the App on selected repositories.
 2. Choose a repository you administer. Personal installations require the owner.
 3. Request activation. Only `chickadee` is included by default; explicitly request
-   additional size/OS queues. Once your account is approved, configured host queues
+   additional size/OS queues. Authenticated users are approved automatically when the operator enables automatic activation. Configured host queues
    can activate automatically; wait until the dashboard shows them enabled before
    using their labels.
 4. An approved request becomes active after the controller's queues are ready.
@@ -33,12 +33,27 @@ Use pinned SSH host keys and a dedicated private SSH key to reach that host.
 Copy `scripts/reconcile-site.py`, `scripts/admit-installation.py` and
 `scripts/setup-app.py` to `/usr/local/lib/chickadee/` on the runner host.
 Keep a root-owned mode-0600 policy at `/etc/chickadee/managed-policy.json`, based
-on `examples/service-policy.json`. Approve numeric GitHub user IDs once. Set `auto_queues: true` for approved
-customers to permit their explicitly requested queues from the configured host
-catalog without per-label approval. Unknown accounts remain pending, unknown
-labels cannot become profiles, and approval does not enable unrequested queues.
-For tighter operator control, omit `auto_queues` and list allowed labels in
-`queues`. The example uses placeholder IDs and contains no secrets.
+on `examples/service-policy.json`. Set `auto_approve_authenticated: true` to
+approve all authenticated GitHub users from fresh private-admin site enrollments.
+Enable `CHICKADEE_AUTOMATIC_ACTIVATION=1` on the site for the matching signup UI.
+Operator seeds and cached requests cannot create automatically approved scopes.
+Explicit `approved_users` entries override automatic queue/concurrency defaults.
+Automatic customers receive at most one VM and only requested labels in the host
+catalog; unknown labels cannot become image profiles. The default queue is always
+included. No GitHub permissions are changed automatically.
+
+Set `auto_repository_workflows: true` to permit all workflows, including PR jobs,
+in exactly the requested App-selected organization repository. This applies to
+private and public repositories; public access additionally uses the host helper's
+explicit `--allow-public-repository` flag. The site verifies repository admin
+permission; the reconciler and helper recheck the requester’s current admin role
+and immutable GitHub user ID using the [metadata-read collaborator permission endpoint](https://docs.github.com/en/rest/collaborators/collaborators#get-repository-permissions-for-a-user). The helper also independently verifies current App installation and
+repository selection. Existing runner groups must already select exactly that
+one repository; another repository or an unrelated group is never adopted.
+The operator's primary scope is never changed. Running public repository PR code
+requires the operator to accept the service's untrusted-job isolation model.
+With either automatic option omitted, retain explicit numeric-user approvals and
+workflow-specific policies. The example contains placeholder IDs and no secrets.
 New scopes default to one concurrent VM across all their enabled queues.
 Credential-free warm VMs are shared across customers and aliases with exactly
 the same immutable image, machine, CPU, memory and disk. The operator profile
@@ -88,15 +103,21 @@ organization cannot silently inherit a guessed path. GitHub's selected-workflow
 restriction accepts branch/tag/SHA refs and rejects `refs/pull/.../merge`.
 
 An operator can explicitly authorize every workflow, including PRs, in one
-selected **private** organization repository using `--repository-only` and
+selected private organization repository using `--repository-only` and
 `repository_workflow_access: {"987654321": "repository"}` in the private policy.
 The key is the exact numeric repository ID, not an organization-wide grant.
 The reconciler preserves this mode; it does not reapply a main-only restriction.
-Public repositories and groups containing other selected repositories cannot
-use this override. Personal repository scopes already operate at repository
+Public repositories additionally require explicit `--allow-public-repository`
+authorization (the automatic repository policy supplies this flag). Groups
+containing other selected repositories cannot use this override. Personal repository scopes already operate at repository
 scope. Review the beta workload trust model before authorizing a customer.
 
-This initial bridge admits one enrollment per GitHub scope. Organization queues
+This initial bridge admits one repository enrollment per GitHub organization
+scope. A second repository or different requester for that organization is
+marked with an actionable setup error and skipped while other enrollments
+continue; it never silently replaces or widens the
+existing runner group. Multi-repository organization onboarding is not implemented.
+Organization queues
 are shared by the group's selected repository/workflow policy, not private to
 one workflow job. Conflicting scope ownership requires operator review. It
 uses no database or public admin API and never edits customer workflow files.

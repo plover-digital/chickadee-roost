@@ -30,9 +30,23 @@ requests recheck GitHub access and require both a CSRF token and the exact site 
 GitHub setup callback parameters are not evidence of identity or installation ownership.
 
 The website does not receive the runner controller's App private key. Installing or
-authorizing the App does not immediately consume runner capacity: activation remains
-operator-approved during the trusted beta. Host provisioning uses installation credentials,
+authorizing the App does not establish runner availability. Operators can choose
+manual approval (the portable default) or explicitly enable automatic hosted
+activation for verified account owners/repository administrators. The web flag
+and backend policy must agree; neither path changes GitHub permissions. Host provisioning uses installation credentials,
 and disposable guests receive only per-runner JIT configuration.
+
+Authenticated enrollment records contain a server-assigned `authenticated: true`.
+The browser cannot grant that provenance: it is set only after session, current
+repository-admin/owner, App permission, CSRF, and Origin checks. Operator imports
+force the field false. This records enrollment-time verification, not perpetual
+GitHub access; automatic backend admission must recheck current access. User
+tokens are not included in the operator status API.
+
+Native HTML forms require the `same-origin` referrer policy so browsers send a
+usable same-origin Origin header. `Origin: null`, foreign origins, and invalid
+CSRF still fail closed. OAuth callback state, browser nonce, and PKCE checks are
+unchanged by automatic activation.
 
 ## App settings for a deployment
 

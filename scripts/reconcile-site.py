@@ -10,8 +10,31 @@ spec=importlib.util.spec_from_file_location('admit',pathlib.Path(__file__).with_
 admit=importlib.util.module_from_spec(spec);spec.loader.exec_module(admit)
 
 
-def approved_request(entry, policy, profile_catalog=None):
+def authenticated_request(entry):
+    """Only private-admin site records with verified identity can enter auto policy."""
+    if entry.get('authenticated') is not True:return False
+    if not isinstance(entry.get('id'),str) or not entry['id']:return False
+    for value in (entry.get('user',{}).get('id'),entry.get('account',{}).get('id'),entry.get('repository',{}).get('id'),entry.get('installation_id')):
+        if type(value)!=int or value<=0:return False
+    account=entry['account'];repo=entry['repository']
+    if account.get('type')=='User':return account['id']==entry['user']['id']
+    if account.get('type')=='Organization':return (repo.get('permissions') or {}).get('admin') is True
+    return False
+
+
+def trusted_site_entry(entry, site_available, config):
+    if not authenticated_request(entry):return False
+    if site_available:return True
+    # Cached provenance may maintain existing scopes, never provision a new one.
+    scope=(config.get('scopes') or {}).get(scope_name(entry))
+    url='https://github.com/'+(entry['account']['login'] if entry['account']['type']=='Organization' else entry['repository']['full_name'])
+    return bool(scope and scope.get('app_installation_id')==entry['installation_id'] and scope.get('github_url','').lower().rstrip('/')==url.lower().rstrip('/'))
+
+
+def approved_request(entry, policy, profile_catalog=None, authenticated=False):
     approval=policy.get('approved_users',{}).get(str(entry['user']['id']))
+    if approval is None and policy.get('auto_approve_authenticated') is True and authenticated and authenticated_request(entry):
+        approval={'auto_queues':True,'max_vms':1}
     if approval is None:return None
     desired=entry.get('desired_state') or 'active'
     if desired not in ('active','paused','disconnected'):raise ValueError('invalid desired state')
@@ -28,10 +51,41 @@ def scope_name(entry):
     return ('org-'+str(entry['account']['id']) if entry['account']['type']=='Organization' else 'repo-'+str(entry['repository']['id']))
 
 
-def workflow_access(entry, policy):
+def validate_scope_merge(previous, entry):
+    if previous is not None and (previous['user']['id']!=entry['user']['id'] or previous['installation_id']!=entry['installation_id'] or previous['repository']['id']!=entry['repository']['id']):
+        raise ValueError('conflicting scope owners or repositories require operator review')
+
+
+def merge_site_requests(entries, policy, catalog, site_available, original):
+    updates=[]
+    requests_by_scope={scope_name(e):e for e in policy.get('managed_requests',[])}
+    authenticated_scopes=set()
+    # Applied records win over pending conflicts regardless of listing order.
+    for entry in sorted(entries,key=lambda e:not bool(e.get('enabled_queues'))):
+        trusted=trusted_site_entry(entry,site_available,original)
+        if approved_request(entry,policy,catalog,authenticated=trusted) is None:continue
+        name=scope_name(entry);previous=requests_by_scope.get(name)
+        try:
+            validate_scope_merge(previous,entry)
+        except ValueError:
+            # Keep the established scope and let unrelated enrollments progress.
+            if entry.get('id'):
+                updates.append({'id':entry['id'],'status':'error','enabled_queues':[],
+                    'message':'This organization already has a different repository or requester configured. Only one repository per organization is supported; contact the operator to replace it.'})
+            continue
+        merged=dict(entry)
+        if previous is not None and not merged.get('workflow_path') and previous['repository']['id']==entry['repository']['id'] and previous.get('workflow_path'):
+            merged['workflow_path']=previous['workflow_path']
+        requests_by_scope[name]=merged
+        if trusted:authenticated_scopes.add(name)
+    return list(requests_by_scope.values()),authenticated_scopes,updates
+
+
+def workflow_access(entry, policy, authenticated=False):
     mode=policy.get('repository_workflow_access',{}).get(str(entry['repository']['id']),'workflow')
+    if authenticated and authenticated_request(entry) and policy.get('auto_repository_workflows') is True and entry['account']['type']=='Organization':mode='repository'
     if mode not in ('workflow','repository'):raise ValueError('invalid operator workflow access policy')
-    if mode=='repository' and (entry['account']['type']!='Organization' or not entry['repository'].get('private')):
+    if mode=='repository' and (entry['account']['type']!='Organization' or (not entry['repository'].get('private') and not (authenticated and policy.get('auto_repository_workflows') is True))):
         raise ValueError('repository-only workflow approval requires an exact private organization repository')
     return mode
 
@@ -211,20 +265,12 @@ def main():
     updates=[];quarantine=set()
     # Managed scope seeds allow revocation checks before a user has signed in.
     catalog=original.get('profiles') or original.get('scopes',{}).get('primary',{}).get('profiles',{})
-    requests_by_scope={scope_name(e):e for e in policy.get('managed_requests',[])}
-    for entry in entries:
-        if approved_request(entry,policy,catalog) is None:continue
-        name=scope_name(entry);previous=requests_by_scope.get(name)
-        if previous is not None and (previous['user']['id']!=entry['user']['id'] or previous['installation_id']!=entry['installation_id']):raise ValueError('conflicting scope owners require operator review')
-        merged=dict(entry)
-        if previous is not None and not merged.get('workflow_path') and previous['repository']['id']==entry['repository']['id'] and previous.get('workflow_path'):
-            merged['workflow_path']=previous['workflow_path']
-        requests_by_scope[name]=merged
-    requests=list(requests_by_scope.values())
+    requests,authenticated_scopes,merge_updates=merge_site_requests(entries,policy,catalog,site_available,original)
+    updates.extend(merge_updates)
     jwt=admit.setup.app_jwt(original['app_client_id'],pathlib.Path(original['app_key_file']))
     verified={}
     for entry in requests:
-        request=approved_request(entry,policy,catalog)
+        request=approved_request(entry,policy,catalog,authenticated=scope_name(entry) in authenticated_scopes)
         if request is None:continue
         name=scope_name(entry)
         # Never let an enrollment mutate the operator's primary scope.
@@ -236,11 +282,12 @@ def main():
         if name in verified:raise ValueError('multiple requests target one scope; operator reconciliation required')
         verified[name]=True
         desired=entry.get('desired_state') or 'active';status='pending';enabled=[];message='';applied_workflow='';applied_access='workflow'
-        revoked=False
+        revoked=False;admin_missing=False
         try:
             lookup_installation=True
             installation=admit.setup.api('/app/installations/'+str(entry['installation_id']),token=jwt)
             lookup_installation=False
+            admit.validate_installation_identity(installation,entry)
             required='organization_self_hosted_runners' if entry['account']['type']=='Organization' else 'administration'
             revoked=bool(installation.get('suspended_at')) or installation['permissions'].get(required)!='write'
             if not revoked:
@@ -252,6 +299,9 @@ def main():
                     if found or len(listing['repositories'])<100:break
                 if not found and len(listing['repositories'])==100:raise RuntimeError('repository verification exceeded page limit')
                 revoked=not found
+                if not revoked and name in authenticated_scopes and entry['account']['type']=='Organization':
+                    admin_missing=not admit.current_repository_admin(entry,token)
+                    revoked=admin_missing
         except RuntimeError as err:
             # A 404 from App-authenticated installation lookup confirms removal.
             if lookup_installation and str(err)=='GitHub setup API returned HTTP 404':revoked=True
@@ -262,10 +312,10 @@ def main():
                 candidate['scopes'].pop(name);quarantine.add(old['github_url'].lower().rstrip('/'))
             elif old:old['disabled']=True
             status='permission-required' if revoked else desired
-            message='GitHub access removed, suspended, or awaiting permission approval.' if revoked else 'New assignments stopped; running jobs finished before applying this state.'
+            message=('The signup user must currently have admin access to the selected repository; restore access and retry.' if admin_missing else 'GitHub access removed, suspended, or awaiting permission approval.') if revoked else 'New assignments stopped; running jobs finished before applying this state.'
         else:
             try:
-                mode=workflow_access(request,policy)
+                mode=workflow_access(request,policy,authenticated=name in authenticated_scopes)
                 workflow='.github/workflows/chickadee.yml' if mode=='repository' else workflow_for_request(request,policy,original)
             except WorkflowPathRequired as error:
                 # One incomplete org setup must not block all other beta users.
@@ -277,13 +327,22 @@ def main():
                 req=pathlib.Path(tmp)/'request.json';req.write_text(json.dumps(request));req.chmod(0o600)
                 output=pathlib.Path(tmp)/'output.json'
                 command=['python3',str(pathlib.Path(__file__).with_name('admit-installation.py')),'--config',str(config),'--request',str(req),'--output',str(output),'--trusted-workflows','--workflow',workflow]
-                if mode=='repository':command.append('--repository-only')
-                subprocess.run(command,check=True,stdout=subprocess.DEVNULL)
+                if name in authenticated_scopes:command.append('--require-current-admin')
+                if mode=='repository':
+                    command.append('--repository-only')
+                    if not request['repository'].get('private'):command.append('--allow-public-repository')
+                try:
+                    subprocess.run(command,check=True,stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL)
+                except subprocess.CalledProcessError:
+                    if entry.get('id'):updates.append({'id':entry['id'],'status':'error','enabled_queues':[],
+                        'message':'Runner setup could not be verified. Existing controller configuration was preserved; contact the operator to resolve setup.'})
+                    continue
                 candidate=json.loads(output.read_text())
             scope=candidate['scopes'][name]
             # Policy defines exact enabled queues, not a permanent union.
             scope['profiles']={q:p for q,p in scope['profiles'].items() if q in request['queues']}
             scope['max_vms']=request['max_vms']
+            for profile in scope['profiles'].values():profile['max_vms']=min(profile['max_vms'],request['max_vms'])
             scope.pop('disabled',None)
             enabled=list(scope['profiles']);status='active';applied_workflow='' if mode=='repository' else workflow;applied_access=mode
             if set(entry.get('queues') or ['chickadee'])-set(enabled):message='Additional queue requests are awaiting operator approval.'

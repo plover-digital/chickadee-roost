@@ -70,7 +70,8 @@ as proof of ownership. The enrollment POST rechecks access, requires CSRF and
 Origin checks, and stores no OAuth credentials on disk.
 
 **A pending request does not create runners or change controller config.** The
-first hosted beta requires operator admission and a configured GitHub scope.
+backend must admit the request under the configured operator policy and
+acknowledge its GitHub scope before reporting it active.
 Use Chickadee’s [scope example](https://github.com/plover-digital/chickadee/blob/main/examples/scopes.json) to serve multiple authorized org/repo scopes in one
 controller. Each scope has independent scale sets and JIT credentials while
 sharing the host CPU, memory, concurrency and TAP budgets. Never launch multiple
@@ -175,7 +176,8 @@ repositories retain separate services and queue editors. The beta dashboard
 still requires the activation-request creator and current repository-admin
 access; an organization row does not grant organization-owner privileges.
 
-Organization activation forms require the exact main-branch workflow file path,
+Under manual workflow-restricted policy, organization activation forms require
+the exact main-branch workflow file path,
 for example `.github/workflows/build.yml`. The site rejects URLs, traversal,
 nested workflow directories, and alternate ref suffixes. It builds the displayed
 allowlist reference from the GitHub-verified repository and `refs/heads/main`.
@@ -184,9 +186,10 @@ that the file exists before approving it. Requests store `workflow_path`; the
 private status relay reports `enabled_workflow_path` after applying access.
 Existing records with no path remain readable for legacy operator handling.
 
-Pending requests say **awaiting approval**, not processing. The private operator
-may report `approved` only after review; that state describes activation being
-processed. `active` remains the applied state. Requested workflow changes do
+With manual policy, pending requests say **awaiting approval**, not processing.
+With the explicit automatic hosted policy, verified requests enter `approved`
+and describe activation being processed; they do not populate enabled queues.
+A private operator can also report `approved` after manual review. `active` remains the applied state. Requested workflow changes do
 not replace the previously applied workflow access until approved and reported.
 
 An operator can explicitly approve repository-wide workflow access for a trusted
@@ -196,3 +199,42 @@ group policy has been applied. This is distinct from the default exact main-bran
 workflow restriction (`"workflow"`). New requests do not grant this broader mode;
 the dashboard describes the actual approved mode without requiring a main-only
 file path for a repository that already has repository-wide approval.
+
+
+## Activation policy
+
+Manual admission is the portable default. Leave
+`CHICKADEE_AUTOMATIC_ACTIVATION` unset and use explicit backend user/workflow
+approvals. This keeps the existing manual onboarding behavior.
+
+For an operator-controlled automatic hosted deployment, set
+`CHICKADEE_AUTOMATIC_ACTIVATION=1` on the web service and
+`auto_approve_authenticated: true` in its private backend policy. The backend
+requires server-authenticated enrollment provenance and rechecks GitHub account,
+installation, repository selection, and current administration authority.
+Operator-imported seeds do not qualify for automatic account approval.
+
+Pair the web flag with `auto_repository_workflows: true` when enabling the
+path-free organization signup experience. Under that backend policy, a fresh
+verified request can authorize all workflows, including PR jobs, for exactly
+its selected repository. Both private and public repository cases still require
+the backend's exact-repository ownership/selection guard; browser fields cannot
+choose this mode or claim a repository is private. Existing unrelated groups
+and the operator's primary scope are not automatically broadened.
+
+The web flag alone performs no GitHub runner-group mutation. It records an
+activation request and shows processing until the private relay reports actual
+applied queues/access. `chickadee` remains the only default queue; additional
+supported labels remain opt-in and bounded by backend catalog and host capacity.
+Deploy these settings together and verify the real signup-to-enabled flow before
+claiming automatic activation is live. Standalone Chickadee needs neither policy
+nor Roost.
+
+The current organization bridge supports one selected repository and one account
+managing its runner pool per organization. The dashboard edits that established
+scope; it does not offer a second repository as another independent pool. A
+conflicting signup returns an actionable conflict without naming another user
+or repository. Changing the repository or manager requires operator
+reconciliation; disconnecting a request does not silently replace the owned
+GitHub runner group. Personal repositories remain independent. Existing failed
+second requests do not replace the established pool's status or usage.

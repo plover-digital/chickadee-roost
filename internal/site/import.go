@@ -22,6 +22,8 @@ func (s *Server) importEnrollment(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "Invalid verified metadata", 400)
 		return
 	}
+	// Operator imports are not evidence of a browser-authenticated enrollment.
+	entry.Authenticated = false
 	if entry.Account.Type == "User" {
 		if entry.Account.ID != entry.User.ID {
 			http.Error(w, "Personal installation must belong to user", 400)

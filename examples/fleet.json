@@ -1,0 +1,30 @@
+{
+  "version": 1,
+  "broker_id": "roost",
+  "state_dir": "/var/lib/chickadee-roost",
+  "status_dir": "/var/lib/chickadee",
+  "budget": {
+    "max_vms": 2,
+    "max_cpus": 6,
+    "max_memory_mib": 12288
+  },
+  "image_digests": {
+    "ubuntu-2604": "0000000000000000000000000000000000000000000000000000000000000000"
+  },
+  "workers": [
+    {
+      "endpoint": "https://127.0.0.1:18443",
+      "server_name": "worker-1.chickadee.internal",
+      "identity": {
+        "worker_id": "worker-1",
+        "broker_id": "roost",
+        "generation": 1
+      },
+      "tls": {
+        "certificate_file": "/etc/chickadee-roost/tls/broker.crt",
+        "key_file": "/etc/chickadee-roost/tls/broker.key",
+        "ca_file": "/etc/chickadee-roost/tls/ca.crt"
+      }
+    }
+  ]
+}

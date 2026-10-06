@@ -171,3 +171,76 @@ class LostLiveAcknowledgement(unittest.TestCase):
     (root/'reload.json').write_text(json.dumps({'config_sha256':digest,'updated_at':timestamp,'status':'applied'}))
     with patch.object(m.time,'monotonic',side_effect=[0,151]):
      with self.assertRaises(m.LiveReloadUncertain):m.wait_reload_ack(root,'expected',time.time())
+
+class AutomaticAuthenticatedAccounts(unittest.TestCase):
+ def setUp(self):
+  self.entry={'id':'site-record','authenticated':True,'user':{'id':7},'account':{'id':7,'type':'User'},'repository':{'id':99,'private':True},'installation_id':123,'queues':['chickadee-small-ubuntu-2404','unknown']}
+  self.policy={'auto_approve_authenticated':True,'auto_repository_workflows':True}
+  self.catalog={'chickadee':{},'chickadee-small-ubuntu-2404':{}}
+ def test_verified_site_user_auto_approved_known_requested_catalog_only(self):
+  r=m.approved_request(self.entry,self.policy,self.catalog,authenticated=True)
+  self.assertEqual(r['max_vms'],1);self.assertEqual(r['queues'],list(self.catalog))
+ def test_policy_seed_and_unverified_user_not_autoapproved(self):
+  self.assertIsNone(m.approved_request(self.entry,self.policy,self.catalog))
+  for field in ['id','installation_id']:
+   entry=dict(self.entry);entry.pop(field)
+   self.assertIsNone(m.approved_request(entry,self.policy,self.catalog,authenticated=True))
+ def test_personal_nonowner_and_boolean_id_rejected(self):
+  self.entry['user']={'id':8};self.assertFalse(m.authenticated_request(self.entry))
+  self.entry['user']={'id':True};self.assertFalse(m.authenticated_request(self.entry))
+ def test_explicit_operator_limits_override_automatic_defaults(self):
+  self.policy['approved_users']={'7':{'max_vms':2,'queues':['chickadee']}}
+  r=m.approved_request(self.entry,self.policy,self.catalog,authenticated=True)
+  self.assertEqual(r['max_vms'],2);self.assertEqual(r['queues'],['chickadee'])
+ def test_org_admin_verification_and_public_repo_explicit_policy(self):
+  self.entry['account']={'id':8,'type':'Organization'}
+  self.assertFalse(m.authenticated_request(self.entry))
+  self.entry['repository'].update(private=False,permissions={'admin':True})
+  self.assertTrue(m.authenticated_request(self.entry))
+  self.assertEqual(m.workflow_access(self.entry,self.policy,authenticated=True),'repository')
+  self.assertEqual(m.workflow_access(self.entry,self.policy),'workflow')
+  self.assertEqual(m.workflow_access(self.entry,{},authenticated=True),'workflow')
+
+ def test_offline_import_never_authenticated(self):
+  self.entry.pop('authenticated')
+  self.assertIsNone(m.approved_request(self.entry,self.policy,self.catalog,authenticated=True))
+ def test_cache_maintains_only_matching_existing_scope(self):
+  self.entry['repository']['full_name']='owner/repo'
+  self.assertFalse(m.trusted_site_entry(self.entry,False,{}))
+  c={'scopes':{'repo-99':{'app_installation_id':123,'github_url':'https://github.com/owner/repo'}}}
+  self.assertTrue(m.trusted_site_entry(self.entry,False,c))
+  c['scopes']['repo-99']['app_installation_id']=124
+  self.assertFalse(m.trusted_site_entry(self.entry,False,c))
+
+class ScopeMergeAuthorization(unittest.TestCase):
+ def test_same_org_cannot_silently_replace_selected_repository_or_owner(self):
+  import copy
+  first={'user':{'id':1},'installation_id':2,'repository':{'id':3}}
+  m.validate_scope_merge(first,copy.deepcopy(first))
+  for field in ['user','repository']:
+   other=copy.deepcopy(first);other[field]['id']=4
+   with self.assertRaises(ValueError):m.validate_scope_merge(first,other)
+  other=dict(first,installation_id=5)
+  with self.assertRaises(ValueError):m.validate_scope_merge(first,other)
+ def test_disconnected_auto_request_remains_disconnected(self):
+  e={'id':'site','authenticated':True,'user':{'id':1},'account':{'id':1,'type':'User'},'installation_id':2,'repository':{'id':3},'desired_state':'disconnected'}
+  r=m.approved_request(e,{'auto_approve_authenticated':True},{'chickadee':{}},authenticated=True)
+  self.assertEqual(r['desired_state'],'disconnected')
+
+class ConflictingEnrollmentIsolation(unittest.TestCase):
+ def test_pending_conflict_does_not_replace_applied_org_or_block_other_account(self):
+  import copy
+  old={'id':'applied','authenticated':True,'user':{'id':1},'account':{'id':10,'login':'org','type':'Organization'},'installation_id':2,'repository':{'id':3,'full_name':'org/first','private':True,'permissions':{'admin':True}},'enabled_queues':['chickadee']}
+  conflict=copy.deepcopy(old);conflict['id']='pending';conflict['repository']['id']=4;conflict['repository']['full_name']='org/second';conflict['enabled_queues']=[]
+  other={'id':'other','authenticated':True,'user':{'id':5},'account':{'id':5,'type':'User','login':'user'},'installation_id':6,'repository':{'id':7,'full_name':'user/repo'}}
+  requests,trusted,updates=m.merge_site_requests([conflict,other,old],{'auto_approve_authenticated':True},{'chickadee':{}},True,{})
+  self.assertEqual({e['id'] for e in requests},{'applied','other'})
+  self.assertEqual(trusted,{'org-10','repo-7'})
+  self.assertEqual(len(updates),1);self.assertEqual(updates[0]['id'],'pending');self.assertEqual(updates[0]['status'],'error')
+  self.assertNotIn('org/first',updates[0]['message']);self.assertNotIn('applied',updates[0]['message'])
+ def test_operator_seed_retained_when_conflicting_site_request_skipped(self):
+  seed={'user':{'id':1},'account':{'id':10,'type':'Organization','login':'org'},'installation_id':2,'repository':{'id':3}}
+  conflict={'id':'new','authenticated':True,'user':{'id':4},'account':seed['account'],'installation_id':2,'repository':{'id':5,'permissions':{'admin':True}}}
+  policy={'managed_requests':[seed],'approved_users':{'1':{}},'auto_approve_authenticated':True}
+  requests,trusted,updates=m.merge_site_requests([conflict],policy,{'chickadee':{}},True,{})
+  self.assertEqual(requests,[seed]);self.assertEqual(trusted,set());self.assertEqual(updates[0]['status'],'error')

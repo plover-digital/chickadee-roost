@@ -37,11 +37,18 @@ migration-compatible integration, not a distributed worker API. Repository and
 organization requests retain stable `chickadee` runner labels; customers do not
 select a physical host.
 
-New accounts request beta approval and start with only `chickadee`. Approved
-accounts can opt into supported queues. Requested selection remains distinct
+New accounts start with only `chickadee`. Operators can retain manual admission
+or opt into automatic activation for GitHub-authenticated owners/administrators.
+Eligible accounts can opt into supported queues. Requested selection remains distinct
 from applied availability. Organization usage describes its shared scope;
 personal repositories remain separate. The graph shows completed reserved VM
 time, including runner connection and cleanup, not billable job minutes.
+
+The web flag `CHICKADEE_AUTOMATIC_ACTIVATION=1` must be paired with the private
+backend admission policy. It changes the signup experience, not GitHub permissions
+or applied runner availability. Without that flag, the portable default remains
+manual approval. Enabling these paths in source is not evidence that a deployment
+has enabled them; see [activation policy](docs/onboarding-site.md#activation-policy).
 
 ## Build and test
 
@@ -78,3 +85,11 @@ Future fleet integration should use an explicit versioned API with worker
 identity and acknowledgement; it must preserve independent Chickadee operation.
 The current trusted beta does not imply an unattended public compute service or
 an isolation/reliability guarantee.
+
+## Experimental service manager
+
+`make build` also produces `bin/chickadee-roost`, the central GitHub listener and
+fleet broker. It uses the pinned official scaleset client and Chickadee public
+worker API, with no host-engine internal imports. See [fleet operation and
+limitations](docs/fleet.md). The website and broker run as separate services;
+restarting the broker preserves worker jobs.

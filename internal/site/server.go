@@ -33,6 +33,7 @@ var slugPattern = regexp.MustCompile(`^[a-z0-9][a-z0-9-]{0,99}$`)
 type Config struct {
 	PublicURL, AppSlug, ClientID, ClientSecret, StateDir string
 	AppID                                                int64
+	AutomaticActivation                                  bool
 }
 type User struct {
 	ID    int64  `json:"id"`
@@ -61,6 +62,7 @@ type Choice struct {
 	SelectedQueues        []string
 	WorkflowPath          string
 	EnabledWorkflowAccess string
+	EnrollmentNotice      string
 }
 
 func (c Choice) HasQueue(queue string) bool {
@@ -73,6 +75,7 @@ func (c Choice) HasQueue(queue string) bool {
 }
 
 type Enrollment struct {
+	Authenticated         bool       `json:"authenticated,omitempty"`
 	ID                    string     `json:"id"`
 	User                  User       `json:"user"`
 	InstallationID        int64      `json:"installation_id"`
@@ -118,6 +121,7 @@ type page struct {
 	Enrollments          []Enrollment
 	ExtraQueues          []string
 	LoginReady           bool
+	AutomaticActivation  bool
 }
 
 func New(c Config) (*Server, error) {
@@ -221,6 +225,7 @@ func (s *Server) current(r *http.Request) (string, session, bool) {
 }
 func (s *Server) render(w http.ResponseWriter, p page) {
 	p.LoginReady = s.ready()
+	p.AutomaticActivation = s.cfg.AutomaticActivation
 	var b bytes.Buffer
 	if e := s.templates.ExecuteTemplate(&b, "page.html", p); e != nil {
 		http.Error(w, "Page unavailable", 500)
@@ -390,6 +395,7 @@ func (s *Server) dashboard(w http.ResponseWriter, r *http.Request) {
 	}
 	s.mu.Lock()
 	for i := range p.Choices {
+		p.Choices[i].EnrollmentNotice = organizationConstraint(s.enrollments, v.User, p.Choices[i])
 		for _, entry := range s.enrollments {
 			if entry.User.ID == v.User.ID && entry.InstallationID == p.Choices[i].Installation.ID && entry.Repository.ID == p.Choices[i].Repository.ID {
 				p.Choices[i].SelectedQueues = append([]string(nil), entry.Queues...)
@@ -506,6 +512,13 @@ func (s *Server) enroll(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "Repository not authorized", 403)
 		return
 	}
+	s.mu.Lock()
+	constraint := organizationConstraint(s.enrollments, v.User, *choice)
+	s.mu.Unlock()
+	if constraint != "" {
+		http.Error(w, constraint, http.StatusConflict)
+		return
+	}
 	workflowPath := strings.TrimSpace(r.FormValue("workflow_path"))
 	repositoryAccess := false
 	s.mu.Lock()
@@ -516,7 +529,7 @@ func (s *Server) enroll(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	s.mu.Unlock()
-	if choice.Installation.Account.Type == "Organization" && !repositoryAccess && !validWorkflowPath(workflowPath) || workflowPath != "" && !validWorkflowPath(workflowPath) {
+	if choice.Installation.Account.Type == "Organization" && !repositoryAccess && !s.cfg.AutomaticActivation && !validWorkflowPath(workflowPath) || workflowPath != "" && !validWorkflowPath(workflowPath) {
 		http.Error(w, "Enter an exact main-branch workflow path, such as .github/workflows/build.yml.", 400)
 		return
 	}
@@ -527,12 +540,20 @@ func (s *Server) enroll(w http.ResponseWriter, r *http.Request) {
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	if constraint := organizationConstraint(s.enrollments, v.User, *choice); constraint != "" {
+		http.Error(w, constraint, http.StatusConflict)
+		return
+	}
 	for i, entry := range s.enrollments {
 		if entry.InstallationID == iid && entry.Repository.ID == rid && entry.User.ID == v.User.ID {
 			entries := append([]Enrollment(nil), s.enrollments...)
+			entries[i].Authenticated = true
 			entries[i].Queues = queues
 			entries[i].WorkflowPath = workflowPath
 			entries[i].Updated = time.Now().UTC()
+			if s.cfg.AutomaticActivation && entries[i].Status == "pending" {
+				entries[i].Status = "approved"
+			}
 			if e = s.saveLocked(entries); e != nil {
 				http.Error(w, "Request could not be saved", 500)
 				return
@@ -550,7 +571,11 @@ func (s *Server) enroll(w http.ResponseWriter, r *http.Request) {
 	if choice.Installation.Account.Type == "Organization" {
 		scope = "organization"
 	}
-	entries := append(append([]Enrollment(nil), s.enrollments...), Enrollment{ID: random(), User: v.User, InstallationID: iid, Account: choice.Installation.Account, Repository: choice.Repository, Scope: scope, Status: "pending", Queues: queues, WorkflowPath: workflowPath, DesiredState: "active", Created: time.Now().UTC()})
+	initialStatus := "pending"
+	if s.cfg.AutomaticActivation {
+		initialStatus = "approved"
+	}
+	entries := append(append([]Enrollment(nil), s.enrollments...), Enrollment{ID: random(), User: v.User, Authenticated: true, InstallationID: iid, Account: choice.Installation.Account, Repository: choice.Repository, Scope: scope, Status: initialStatus, Queues: queues, WorkflowPath: workflowPath, DesiredState: "active", Created: time.Now().UTC()})
 	if e = s.saveLocked(entries); e != nil {
 		http.Error(w, "Request could not be saved", 500)
 		return
