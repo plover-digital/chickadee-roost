@@ -9,6 +9,12 @@ import (
 	"os"
 )
 
+// WorkerConfig contains trusted broker placement metadata, never worker inventory.
+type WorkerConfig struct {
+	workerapi.ClientConfig
+	PlacementPriority int `json:"placement_priority"`
+}
+
 type FleetConfig struct {
 	Version   int    `json:"version"`
 	BrokerID  string `json:"broker_id"`
@@ -19,8 +25,8 @@ type FleetConfig struct {
 		MaxCPUs      int `json:"max_cpus"`
 		MaxMemoryMiB int `json:"max_memory_mib"`
 	} `json:"budget"`
-	ImageDigests map[string]string        `json:"image_digests"`
-	Workers      []workerapi.ClientConfig `json:"workers"`
+	ImageDigests map[string]string `json:"image_digests"`
+	Workers      []WorkerConfig    `json:"workers"`
 }
 
 func LoadFleet(path string) (FleetConfig, error) {
@@ -40,6 +46,9 @@ func LoadFleet(path string) (FleetConfig, error) {
 	}
 	seen := map[string]bool{}
 	for _, w := range c.Workers {
+		if w.PlacementPriority < -100 || w.PlacementPriority > 100 {
+			return c, fmt.Errorf("invalid worker placement priority")
+		}
 		if !w.Identity.Valid() || w.Identity.BrokerID != c.BrokerID || seen[w.Identity.WorkerID] {
 			return c, fmt.Errorf("invalid worker identity")
 		}

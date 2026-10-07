@@ -10,7 +10,13 @@ import (
 
 // RemoteWorker maps only the public versioned protocol into service-owned DTOs.
 // Roost never imports the host's internal VM/pool/worker implementation.
-type RemoteWorker struct{ Client *workerapi.Client }
+type RemoteWorker struct {
+	Client   *workerapi.Client
+	Priority int
+}
+
+// PlacementPriority is set by private broker configuration, not the remote host.
+func (w RemoteWorker) PlacementPriority() int { return w.Priority }
 
 func record(r workerapi.Record) fleet.Record {
 	q := r.Request

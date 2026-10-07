@@ -131,7 +131,13 @@ func (b *Broker) Sync(ctx context.Context, demands []Demand, workers map[string]
 	for id := range workers {
 		ids = append(ids, id)
 	}
-	sort.Strings(ids)
+	sort.Slice(ids, func(i, j int) bool {
+		a, z := placementPriority(workers[ids[i]]), placementPriority(workers[ids[j]])
+		if a != z {
+			return a > z
+		}
+		return ids[i] < ids[j]
+	})
 	known := map[string]Assignment{}
 	for _, a := range b.assignments {
 		known[a.ID] = a
@@ -385,4 +391,12 @@ func (b *Broker) completedCredits(queue string, revision uint64) int {
 		}
 	}
 	return n
+}
+
+// Optional metadata is supplied by the broker adapter, never host inventory.
+func placementPriority(w Worker) int {
+	if p, ok := w.(interface{ PlacementPriority() int }); ok {
+		return p.PlacementPriority()
+	}
+	return 0
 }

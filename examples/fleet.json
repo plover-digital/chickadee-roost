@@ -13,6 +13,7 @@
   },
   "workers": [
     {
+      "placement_priority": 0,
       "endpoint": "https://127.0.0.1:18443",
       "server_name": "worker-one.chickadee.internal",
       "identity": {

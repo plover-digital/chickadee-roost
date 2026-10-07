@@ -23,6 +23,14 @@ verify every listed file, machine and disk shape before serving. Runner labels
 resolve to content and resource shape; they never choose a physical host.
 
 The scheduler prefers compatible READY guests, then eligible cold capacity.
+Each private worker configuration may set `placement_priority` to an integer
+from -100 to 100 (default 0). Higher values prefer that worker among eligible
+READY hosts, then among eligible cold hosts when no compatible READY guest exists.
+A lower-priority READY guest always wins over higher-priority cold capacity;
+equal priorities use worker ID order. Offline, draining or incompatible workers
+are skipped. Only trusted broker configuration sets priority; worker inventory
+cannot promote itself. Changing priority requires a controlled broker restart.
+
 Workers choose VM IDs and enforce their own CPU/RAM/VM/storage limits. Customer
 quotas span labels and hosts; operator scopes may explicitly have larger quotas.
 Warm VMs are shared physical capacity, unregistered and credential-free.

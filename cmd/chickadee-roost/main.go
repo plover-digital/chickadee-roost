@@ -82,11 +82,11 @@ func run(path string, c dispatch.FleetConfig) error {
 	}
 	workers := map[string]fleet.Worker{}
 	for _, w := range c.Workers {
-		client, e := workerapi.NewClient(w)
+		client, e := workerapi.NewClient(w.ClientConfig)
 		if e != nil {
 			return e
 		}
-		workers[w.Identity.WorkerID] = dispatch.RemoteWorker{Client: client}
+		workers[w.Identity.WorkerID] = dispatch.RemoteWorker{Client: client, Priority: w.PlacementPriority}
 	}
 	values := make(chan update, 256)
 	polls := map[string]poller{}
