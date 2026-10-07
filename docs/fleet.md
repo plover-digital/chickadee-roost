@@ -76,3 +76,18 @@ not hold every admission pass for the generic HTTP timeout. Cold reserve calls
 can time out while a guest continues booting; the broker retries only after a
 definitive missing-assignment status and never replays credential delivery.
 GitHub JIT calls remain bounded and serialized in this prototype.
+
+## Read-only administrator counts
+
+Optionally set `CHICKADEE_WEB_ADMIN_USER_ID` to one positive immutable GitHub
+numeric user ID. That authenticated user sees `/dashboard/admin` and a header
+link; usernames grant no authority. Other users cannot read global telemetry.
+The existing Unix admin socket remains private. An operator collector may POST
+`/telemetry` there with UTC `at`, `ready`, `booting`, `reserved`, `running`,
+`uncertain`, `workers_online`, and `workers_total`. Counts contain no customer or
+host identities. Invalid/out-of-order samples are rejected. The private durable
+history retains the latest report per observed minute for at most 24 hours and
+1440 samples. Missing observations are never filled with invented zero counts.
+Running describes credentialed intent/connected/waiting VMs, not confirmed job
+execution. Offline workers contribute no observed warm counts; uncertain central
+assignments remain explicit. Samples older than three minutes are marked stale.

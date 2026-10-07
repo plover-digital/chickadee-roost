@@ -244,3 +244,26 @@ class ConflictingEnrollmentIsolation(unittest.TestCase):
   policy={'managed_requests':[seed],'approved_users':{'1':{}},'auto_approve_authenticated':True}
   requests,trusted,updates=m.merge_site_requests([conflict],policy,{'chickadee':{}},True,{})
   self.assertEqual(requests,[seed]);self.assertEqual(trusted,set());self.assertEqual(updates[0]['status'],'error')
+
+
+class FleetTelemetry(unittest.TestCase):
+ def test_bounded_fresh_counts_without_metadata(self):
+  import tempfile,json,datetime
+  with tempfile.TemporaryDirectory() as tmp:
+   now=datetime.datetime.now(datetime.timezone.utc)
+   sample=dict(at=now.isoformat(),ready=4,booting=0,reserved=1,running=1,uncertain=0,workers_online=2,workers_total=2)
+   path=pathlib.Path(tmp)/'status.json'
+   path.write_text(json.dumps({'fleet':sample,'queues':[{'github_url':'private'}]}))
+   self.assertEqual(m.fleet_telemetry(tmp,now),sample)
+   sample['at']=(now-datetime.timedelta(minutes=3)).isoformat();path.write_text(json.dumps({'fleet':sample}))
+   self.assertIsNone(m.fleet_telemetry(tmp,now))
+   sample['at']=now.isoformat();sample['running']=True;path.write_text(json.dumps({'fleet':sample}))
+   with self.assertRaises(ValueError):m.fleet_telemetry(tmp,now)
+   sample['running']=1;sample['workers_online']=3;path.write_text(json.dumps({'fleet':sample}))
+   with self.assertRaises(ValueError):m.fleet_telemetry(tmp,now)
+ def test_older_controller_has_no_fabricated_history(self):
+  import tempfile,json
+  with tempfile.TemporaryDirectory() as tmp:
+   self.assertIsNone(m.fleet_telemetry(tmp))
+   (pathlib.Path(tmp)/'status.json').write_text(json.dumps({'queues':[]}))
+   self.assertIsNone(m.fleet_telemetry(tmp))

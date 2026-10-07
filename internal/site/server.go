@@ -33,6 +33,7 @@ var slugPattern = regexp.MustCompile(`^[a-z0-9][a-z0-9-]{0,99}$`)
 type Config struct {
 	PublicURL, AppSlug, ClientID, ClientSecret, StateDir string
 	AppID                                                int64
+	AdminUserID                                          int64
 	AutomaticActivation                                  bool
 }
 type User struct {
@@ -113,6 +114,7 @@ type Server struct {
 	states      map[string]oauthState
 	sessions    map[string]session
 	enrollments []Enrollment
+	telemetry   []FleetSample
 }
 type page struct {
 	Title, Message, CSRF string
@@ -121,6 +123,7 @@ type page struct {
 	Enrollments          []Enrollment
 	ExtraQueues          []string
 	LoginReady           bool
+	IsAdmin              bool
 	AutomaticActivation  bool
 }
 
@@ -163,6 +166,13 @@ func New(c Config) (*Server, error) {
 	s.mux.HandleFunc("GET /auth/github/callback", s.callback)
 	s.mux.HandleFunc("GET /install", s.install)
 	s.mux.HandleFunc("GET /setup", s.setup)
+	if c.AdminUserID < 0 {
+		return nil, errors.New("invalid admin user ID")
+	}
+	if e = s.loadTelemetry(); e != nil {
+		return nil, e
+	}
+	s.mux.HandleFunc("GET /dashboard/admin", s.adminDashboard)
 	s.mux.HandleFunc("GET /dashboard", s.dashboard)
 	s.mux.HandleFunc("POST /enroll", s.enroll)
 	s.mux.HandleFunc("POST /logout", s.logout)
@@ -224,6 +234,7 @@ func (s *Server) current(r *http.Request) (string, session, bool) {
 	return c.Value, v, ok
 }
 func (s *Server) render(w http.ResponseWriter, p page) {
+	p.IsAdmin = p.User != nil && s.cfg.AdminUserID > 0 && p.User.ID == s.cfg.AdminUserID
 	p.LoginReady = s.ready()
 	p.AutomaticActivation = s.cfg.AutomaticActivation
 	var b bytes.Buffer

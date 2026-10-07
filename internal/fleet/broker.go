@@ -22,6 +22,7 @@ type Broker struct {
 	lock        *os.File
 	assignments []Assignment
 	failed      bool
+	telemetry   Telemetry
 }
 
 func (b *Broker) Assignments() []Assignment {
@@ -127,6 +128,8 @@ func (b *Broker) Sync(ctx context.Context, demands []Demand, workers map[string]
 		}
 	}
 	inventory := map[string]Inventory{}
+	observed := map[string]Inventory{}
+	defer func() { b.telemetry = telemetrySnapshot(time.Now(), b.assignments, observed, len(workers)) }()
 	ids := []string{}
 	for id := range workers {
 		ids = append(ids, id)
@@ -150,6 +153,7 @@ func (b *Broker) Sync(ctx context.Context, demands []Demand, workers map[string]
 		if snapshot.Identity.WorkerID != id || snapshot.Identity.BrokerID != b.id || snapshot.Identity.Generation == 0 || snapshot.Budget.MaxVMs < 1 || snapshot.Budget.MaxCPUs < 1 || snapshot.Budget.MaxMemoryMiB < 512 || snapshot.Used.VMs < 0 || snapshot.Used.CPUs < 0 || snapshot.Used.MemoryMiB < 0 || snapshot.Used.VMs > snapshot.Budget.MaxVMs || snapshot.Used.CPUs > snapshot.Budget.MaxCPUs || snapshot.Used.MemoryMiB > snapshot.Budget.MaxMemoryMiB {
 			continue
 		}
+		observed[id] = snapshot
 		for _, record := range snapshot.Records {
 			if record.Request.Identity.BrokerID == b.id && record.State != "terminal" {
 				assignment, exists := known[record.Request.AssignmentID]
@@ -278,8 +282,10 @@ func (b *Broker) Sync(ctx context.Context, demands []Demand, workers map[string]
 		fresh, err := workers[choice].Inventory(ctx)
 		if err != nil || !sameIdentity(fresh.Identity, a.Worker) {
 			delete(inventory, choice)
+			delete(observed, choice)
 		} else {
 			inventory[choice] = fresh
+			observed[choice] = fresh
 		}
 	}
 	return nil

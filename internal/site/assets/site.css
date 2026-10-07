@@ -15,3 +15,5 @@
 .organization-repositories{margin:.75rem 0}.organization-repositories summary{font-family:var(--mono);font-size:.8125rem;cursor:pointer;min-height:44px;padding:.5rem 0}.organization-repositories p{font-size:.875rem;margin:.4rem 0;overflow-wrap:anywhere}
 
 .workflow-path{flex-basis:100%;max-width:100%;margin:.5rem 0 1rem}.workflow-path input{font:inherit;min-height:44px;padding:.6rem;border:1px solid var(--line);background:var(--paper);color:var(--ink);width:100%;min-width:0}.workflow-path .note{font-family:system-ui,sans-serif;font-size:.8125rem}
+
+.fleet-chart{display:flex;align-items:flex-end;height:210px;overflow-x:auto;gap:1px}.fleet-chart svg{flex:1;min-width:2px}.fleet-chart rect{fill:#547d69}.fleet-history{overflow-x:auto}.fleet-history td,.fleet-history th{padding:.4rem;text-align:left;white-space:nowrap}

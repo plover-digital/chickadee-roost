@@ -337,7 +337,7 @@ func run(path string, c dispatch.FleetConfig) error {
 					}
 				}
 			}
-			if e = writeStatus(c.StatusDir, queues, demands, assignments, draining); e != nil {
+			if e = writeStatus(c.StatusDir, queues, demands, assignments, draining, broker.Telemetry()); e != nil {
 				return e
 			}
 			if draining {
@@ -388,7 +388,7 @@ func writeJSON(dir, name string, value any) error {
 	defer d.Close()
 	return d.Sync()
 }
-func writeStatus(dir string, queues []dispatch.Queue, demands map[string]fleet.Demand, assignments []fleet.Assignment, draining bool) error {
+func writeStatus(dir string, queues []dispatch.Queue, demands map[string]fleet.Demand, assignments []fleet.Assignment, draining bool, telemetry fleet.Telemetry) error {
 	qs := []map[string]any{}
 	for _, q := range queues {
 		allocated, spent := 0, 0
@@ -402,7 +402,11 @@ func writeStatus(dir string, queues []dispatch.Queue, demands map[string]fleet.D
 		}
 		qs = append(qs, map[string]any{"github_url": q.GitHubURL, "label": q.Label, "assigned_demand": demands[q.Key].Assigned, "allocated_vms": allocated, "ready_vms": 0, "credentialed_vms": spent})
 	}
-	return writeJSON(dir, "status.json", map[string]any{"updated_at": time.Now().UTC(), "draining": draining, "queues": qs})
+	status := map[string]any{"updated_at": time.Now().UTC(), "draining": draining, "queues": qs}
+	if !telemetry.At.IsZero() {
+		status["fleet"] = telemetry
+	}
+	return writeJSON(dir, "status.json", status)
 }
 
 func acknowledge(dir, hash, status string) error {

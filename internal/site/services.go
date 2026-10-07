@@ -1,6 +1,9 @@
 package site
 
-import "fmt"
+import (
+	"fmt"
+	"sort"
+)
 
 // ServiceView groups organization repositories sharing one runner scope. Its
 // representative enrollment retains the existing operator handoff identity.
@@ -91,4 +94,40 @@ func (p page) SetupChoices() []Choice {
 		out = append(out, choice)
 	}
 	return out
+}
+
+// TotalUsage sums distinct authorized services, taking one snapshot per org scope.
+func (p page) TotalUsage() Enrollment {
+	visible := p
+	visible.Enrollments = nil
+	if p.User == nil {
+		return Enrollment{}
+	}
+	for _, entry := range p.Enrollments {
+		if entry.User.ID != p.User.ID {
+			continue
+		}
+		for _, choice := range p.Choices {
+			if choice.Installation.ID == entry.InstallationID && choice.Repository.ID == entry.Repository.ID {
+				visible.Enrollments = append(visible.Enrollments, entry)
+				break
+			}
+		}
+	}
+	days := map[string]UsageDay{}
+	for _, service := range visible.Services() {
+		for _, day := range service.Usage {
+			total := days[day.Date]
+			total.Date = day.Date
+			total.VMSeconds += day.VMSeconds
+			total.VMs += day.VMs
+			days[day.Date] = total
+		}
+	}
+	total := Enrollment{}
+	for _, day := range days {
+		total.Usage = append(total.Usage, day)
+	}
+	sort.Slice(total.Usage, func(i, j int) bool { return total.Usage[i].Date < total.Usage[j].Date })
+	return total
 }

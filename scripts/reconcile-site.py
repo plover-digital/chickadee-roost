@@ -10,6 +10,29 @@ spec=importlib.util.spec_from_file_location('admit',pathlib.Path(__file__).with_
 admit=importlib.util.module_from_spec(spec);spec.loader.exec_module(admit)
 
 
+def fleet_telemetry(runtime, now=None):
+    """Forward only fresh bounded global counts; never tenant or worker identities."""
+    import datetime
+    now = now or datetime.datetime.now(datetime.timezone.utc)
+    path = pathlib.Path(runtime) / 'status.json'
+    if not path.exists():return None
+    if path.stat().st_size > 2 << 20:raise ValueError('fleet status too large')
+    status = json.loads(path.read_text())
+    sample = status.get('fleet')
+    if sample is None:return None  # Compatible with older controllers.
+    fields = ('ready','booting','reserved','running','uncertain','workers_online','workers_total')
+    if not isinstance(sample,dict) or set(sample) != {'at',*fields}:raise ValueError('invalid fleet telemetry')
+    at = datetime.datetime.fromisoformat(sample['at'].replace('Z','+00:00'))
+    if at.tzinfo is None:raise ValueError('fleet timestamp needs timezone')
+    age = (now-at).total_seconds()
+    if age > 120 or age < -60:return None
+    for key in fields:
+        limit = 64 if key.startswith('workers_') else 1024
+        if type(sample[key]) is not int or not 0 <= sample[key] <= limit:raise ValueError('invalid fleet count')
+    if sample['workers_online'] > sample['workers_total']:raise ValueError('invalid worker coverage')
+    return sample
+
+
 def authenticated_request(entry):
     """Only private-admin site records with verified identity can enter auto policy."""
     if entry.get('authenticated') is not True:return False
@@ -359,6 +382,12 @@ def main():
                      'message':'Approved; activating selected queues in the shared fleet.' if policy.get('live_reload') is True and not quarantine else 'Approved; provisioning the selected queues after running jobs finish.'})
         install_config(candidate,path,quarantine,live_reload=policy.get('live_reload',False) is True)
     if site_available:
+        # Observability failures must not block unrelated customer admission.
+        try:
+            sample=fleet_telemetry(candidate['state_dir'])
+            if sample is not None:admin('telemetry',sample)
+        except Exception:
+            print('fleet telemetry unavailable; dashboard retains last observation',file=__import__('sys').stderr)
         for update in updates:
             seed=update.pop('_import',None)
             if seed is not None:
