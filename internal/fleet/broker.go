@@ -132,9 +132,9 @@ func (b *Broker) Sync(ctx context.Context, demands []Demand, workers map[string]
 		ids = append(ids, id)
 	}
 	sort.Strings(ids)
-	known := map[string]bool{}
+	known := map[string]Assignment{}
 	for _, a := range b.assignments {
-		known[a.ID] = true
+		known[a.ID] = a
 	}
 	for _, id := range ids {
 		snapshot, err := workers[id].Inventory(ctx)
@@ -145,8 +145,11 @@ func (b *Broker) Sync(ctx context.Context, demands []Demand, workers map[string]
 			continue
 		}
 		for _, record := range snapshot.Records {
-			if record.Request.Identity.BrokerID == b.id && record.State != "terminal" && !known[record.Request.AssignmentID] {
-				return ErrUnjournaled
+			if record.Request.Identity.BrokerID == b.id && record.State != "terminal" {
+				assignment, exists := known[record.Request.AssignmentID]
+				if !exists || assignment.Phase == Complete || assignment.Worker.WorkerID != id || !matchesRecord(assignment, record) {
+					return ErrUnjournaled
+				}
 			}
 		}
 		inventory[id] = snapshot

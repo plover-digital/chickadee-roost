@@ -73,6 +73,8 @@ func Open(dir, brokerID string, limits Limits) (*Broker, error) {
 	return b, nil
 }
 func (b *Broker) Close() error {
+	b.mu.Lock()
+	defer b.mu.Unlock()
 	if b.lock == nil {
 		return nil
 	}
