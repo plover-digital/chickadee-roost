@@ -13,7 +13,7 @@ import (
 func TestStatusExportsBoundedGlobalFleetSchema(t *testing.T) {
 	dir := t.TempDir()
 	sample := fleet.Telemetry{At: time.Now().UTC(), Ready: 2, Booting: 1, Reserved: 3, Running: 4, Uncertain: 1, WorkersOnline: 1, WorkersTotal: 2}
-	if err := writeStatus(dir, nil, nil, nil, false, sample); err != nil {
+	if err := writeStatus(dir, nil, nil, nil, false, sample, nil); err != nil {
 		t.Fatal(err)
 	}
 	data, err := os.ReadFile(filepath.Join(dir, "status.json"))
@@ -42,7 +42,7 @@ func TestStatusExportsBoundedGlobalFleetSchema(t *testing.T) {
 }
 func TestStatusDoesNotInventFleetSnapshotBeforeObservation(t *testing.T) {
 	dir := t.TempDir()
-	if err := writeStatus(dir, nil, nil, nil, false, fleet.Telemetry{}); err != nil {
+	if err := writeStatus(dir, nil, nil, nil, false, fleet.Telemetry{}, nil); err != nil {
 		t.Fatal(err)
 	}
 	data, _ := os.ReadFile(filepath.Join(dir, "status.json"))
