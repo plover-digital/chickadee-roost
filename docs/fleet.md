@@ -58,3 +58,9 @@ Live acceptance must prove one real job, exit-before-delete and fresh warm
 replacement on each host, broker restart during a running job, missing-host quota
 retention, and guest denial of host/LAN/other-guest access. Passing unit tests or
 publishing source does not establish these live results.
+
+Worker inventory/status calls have short deadlines so an unavailable host does
+not hold every admission pass for the generic HTTP timeout. Cold reserve calls
+can time out while a guest continues booting; the broker retries only after a
+definitive missing-assignment status and never replays credential delivery.
+GitHub JIT calls remain bounded and serialized in this prototype.
