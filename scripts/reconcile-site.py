@@ -33,6 +33,125 @@ def fleet_telemetry(runtime, now=None):
     return sample
 
 
+def usage_days(records, url, now):
+    import datetime
+    today=now.replace(hour=0,minute=0,second=0,microsecond=0)
+    intervals=[];seen=set()
+    if not isinstance(records,list) or len(records)>10000:raise ValueError('invalid usage ledger')
+    for record in records:
+        if record.get('github_url','').lower().rstrip('/')!=url.lower().rstrip('/'):continue
+        rid=record.get('id')
+        if not isinstance(rid,str) or not rid or rid in seen:raise ValueError('invalid duplicate usage record')
+        seen.add(rid)
+        start=datetime.datetime.fromisoformat(record['reserved_at'].replace('Z','+00:00'))
+        end=datetime.datetime.fromisoformat(record['completed_at'].replace('Z','+00:00'))
+        if start.tzinfo is None or end.tzinfo is None or end<start or (end-start).total_seconds()>25*3600 or end>now+datetime.timedelta(minutes=1):raise ValueError('invalid usage interval')
+        intervals.append((start,end))
+    days=[]
+    for offset in range(-6,1):
+        start=today+datetime.timedelta(days=offset);end=start+datetime.timedelta(days=1)
+        days.append({'date':start.date().isoformat(),'vm_seconds':sum(max(0,(min(b,end)-max(a,start)).total_seconds()) for a,b in intervals),'vms':sum(start<=b<end for _,b in intervals)})
+    return days
+
+
+def account_usage_scope(scope, records, jwt, api, now):
+    """Verify complete ACL; never intersect a wider group's usage into a subset."""
+    iid=scope['app_installation_id']
+    if type(iid) is not int or iid<=0:raise ValueError('invalid installation')
+    match=re.fullmatch(r'https://github\.com/([A-Za-z0-9_.-]+)(?:/([A-Za-z0-9_.-]+))?/?',scope['github_url'])
+    if not match:raise ValueError('invalid scope URL')
+    owner,repo=match.groups();kind='User' if repo else 'Organization'
+    installation=api('/app/installations/'+str(iid),token=jwt)
+    account=installation['account'];aid=account['id']
+    required='administration' if repo else 'organization_self_hosted_runners'
+    if installation.get('id')!=iid or type(aid) is not int or aid<=0 or account.get('type')!=kind or account.get('login','').lower()!=owner.lower() or installation.get('suspended_at') or installation.get('permissions',{}).get(required)!='write':raise ValueError('installation identity or permission changed')
+    token=api('/app/installations/'+str(iid)+'/access_tokens','POST',jwt,{'permissions':{required:'write','metadata':'read'}})['token']
+    accessible={};page=1
+    while True:
+        listing=api('/installation/repositories?per_page=100&page='+str(page),token=token)
+        repositories=listing['repositories']
+        if not isinstance(repositories,list) or len(repositories)>100:raise ValueError('invalid repository list')
+        for item in repositories:
+            rid=item['id']
+            if type(rid) is not int or rid<=0 or rid in accessible:raise ValueError('invalid repository identity')
+            accessible[rid]=item
+        # Bounded accessible installation inventory; never silently truncate.
+        if len(accessible)>1000:raise ValueError('installation repository inventory exceeds limit')
+        if len(repositories)<100:break
+        page+=1
+        if page>10:raise ValueError('installation repository inventory exceeds limit')
+    if repo:
+        selected=[api('/repos/'+owner+'/'+repo,token=token)]
+        if selected[0].get('full_name','').lower()!=(owner+'/'+repo).lower():raise ValueError('repository identity changed')
+    else:
+        group_id=scope['runner_group_id']
+        if type(group_id) is not int or group_id<=0:raise ValueError('invalid group identity')
+        base='/orgs/'+owner+'/actions/runner-groups/'+str(group_id)
+        group=api(base,token=token)
+        if group.get('id')!=group_id or group.get('visibility')!='selected':raise ValueError('usage requires selected group visibility')
+        listing=api(base+'/repositories?per_page=100',token=token)
+        selected=listing['repositories']
+        if type(listing.get('total_count')) is not int or listing['total_count']!=len(selected):raise ValueError('selected ACL incomplete')
+    if not isinstance(selected,list) or not 1<=len(selected)<=100:raise ValueError('invalid selected ACL size')
+    ids=[]
+    for item in selected:
+        rid=item['id']
+        if type(rid) is not int or rid<=0 or rid in ids or rid not in accessible or item.get('owner',{}).get('id')!=aid or accessible[rid].get('owner',{}).get('id')!=aid:raise ValueError('selected ACL outside installation or account')
+        ids.append(rid)
+    return {'installation_id':iid,'account_id':aid,'account_type':kind,'repository_ids':sorted(ids),'observed_at':now.isoformat(),'usage':usage_days(records,scope['github_url'],now)}
+
+
+def read_runner_status(runtime):
+    path=pathlib.Path(runtime)/'status.json'
+    if not path.exists():return None
+    with path.open('rb') as file:raw=file.read((2<<20)+1)
+    if len(raw)>2<<20:raise ValueError('runner status exceeds limit')
+    return json.loads(raw)
+
+
+def runner_activity(status, scope, now):
+    import datetime
+    if status is None:return {}
+    at=datetime.datetime.fromisoformat(status['updated_at'].replace('Z','+00:00'))
+    if at.tzinfo is None:raise ValueError('runner status timestamp requires timezone')
+    age=(now-at).total_seconds()
+    if age>120 or age < -60:return {}
+    queues=status['queues']
+    if not isinstance(queues,list) or len(queues)>2048:raise ValueError('invalid runner status queues')
+    expected=scope['github_url'].lower().rstrip('/')
+    allowed=set(scope.get('profiles',{}))
+    known={'chickadee',*(f'chickadee-{size}-{os}' for size in ('small','medium') for os in ('rocky-102','ubuntu-2404','ubuntu-2604'))}
+    runners=[];seen=set()
+    for queue in queues:
+        if not isinstance(queue,dict):raise ValueError('invalid runner status queue')
+        if queue.get('github_url','').lower().rstrip('/')!=expected:continue
+        label=queue['label'];allocated=queue['allocated_vms'];credentialed=queue['credentialed_vms']
+        if label not in allowed or label not in known or label in seen or len(seen)>=32:raise ValueError('unauthorized or duplicate runner label')
+        seen.add(label)
+        if type(allocated) is not int or not 0<=allocated<=512 or type(credentialed) is not int or not 0<=credentialed<=allocated:raise ValueError('invalid runner counts')
+        if allocated:runners.append({'label':label,'allocated':allocated,'credentialed':credentialed})
+    return {'live_at':at.isoformat(),'runners':sorted(runners,key=lambda entry:entry['label'])}
+
+
+def collect_account_usage(config, records, jwt, api, now, status=None):
+    scopes=config.get('scopes') or {'primary':config}
+    if not isinstance(scopes,dict) or len(scopes)>64:raise ValueError('too many usage scopes')
+    result={};invalid=set()
+    for scope in scopes.values():
+        try:
+            snapshot=account_usage_scope(scope,records,jwt,api,now)
+            try:snapshot.update(runner_activity(status,scope,now))
+            except Exception:
+                print('runner activity unavailable; usage snapshot retained',file=__import__('sys').stderr)
+            key=(snapshot['installation_id'],snapshot['account_type'],snapshot['account_id'] if snapshot['account_type']=='Organization' else snapshot['repository_ids'][0])
+            if key in result:invalid.add(key)
+            else:result[key]=snapshot
+        except Exception:
+            # Private metadata, tokens and upstream error bodies never enter journals.
+            print('account usage ACL unavailable; omitted from replacement snapshot',file=__import__('sys').stderr)
+    return [value for key,value in result.items() if key not in invalid]
+
+
 def authenticated_request(entry):
     """Only private-admin site records with verified identity can enter auto policy."""
     if entry.get('authenticated') is not True:return False
@@ -388,6 +507,20 @@ def main():
             if sample is not None:admin('telemetry',sample)
         except Exception:
             print('fleet telemetry unavailable; dashboard retains last observation',file=__import__('sys').stderr)
+        try:
+            import datetime
+            usage_path=pathlib.Path(candidate['state_dir'])/'usage.json'
+            if usage_path.exists() and usage_path.stat().st_size>8<<20:raise ValueError('usage ledger exceeds limit')
+            records=json.loads(usage_path.read_text()) if usage_path.exists() else []
+            try:runner_status=read_runner_status(candidate['state_dir'])
+            except Exception:runner_status=None
+            snapshots=collect_account_usage(candidate,records,jwt,admit.setup.api,datetime.datetime.now(datetime.timezone.utc),runner_status)
+            admin('account-usage',snapshots)
+        except Exception:
+            # A failed read must not leave a previously authorized ACL snapshot active.
+            try:admin('account-usage',[])
+            except Exception:pass  # Site freshness expiry remains the final fail-closed bound.
+            print('account usage unavailable; dashboard snapshot cleared or expires',file=__import__('sys').stderr)
         for update in updates:
             seed=update.pop('_import',None)
             if seed is not None:

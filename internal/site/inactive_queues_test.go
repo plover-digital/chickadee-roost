@@ -17,7 +17,7 @@ func TestInactiveRunnerCardsHideQueueIntentButPendingKeepsIt(t *testing.T) {
 				t.Fatal(err)
 			}
 			html := out.String()
-			start := strings.Index(html, "<h2>Current runners</h2>")
+			start := strings.Index(html, "<h2>Service status</h2>")
 			if start < 0 {
 				t.Fatal("runner card absent")
 			}

@@ -105,16 +105,17 @@ type session struct {
 	Expires     time.Time
 }
 type Server struct {
-	cfg         Config
-	templates   *template.Template
-	mux         *http.ServeMux
-	http        *http.Client
-	api, oauth  string
-	mu          sync.Mutex
-	states      map[string]oauthState
-	sessions    map[string]session
-	enrollments []Enrollment
-	telemetry   []FleetSample
+	cfg          Config
+	templates    *template.Template
+	mux          *http.ServeMux
+	http         *http.Client
+	api, oauth   string
+	mu           sync.Mutex
+	states       map[string]oauthState
+	sessions     map[string]session
+	enrollments  []Enrollment
+	telemetry    []FleetSample
+	accountUsage []AccountUsage
 }
 type page struct {
 	Title, Message, CSRF string
@@ -124,6 +125,7 @@ type page struct {
 	ExtraQueues          []string
 	LoginReady           bool
 	IsAdmin              bool
+	AccountUsage         []AccountUsage
 	AutomaticActivation  bool
 }
 
@@ -170,6 +172,9 @@ func New(c Config) (*Server, error) {
 		return nil, errors.New("invalid admin user ID")
 	}
 	if e = s.loadTelemetry(); e != nil {
+		return nil, e
+	}
+	if e = s.loadAccountUsage(); e != nil {
 		return nil, e
 	}
 	s.mux.HandleFunc("GET /dashboard/admin", s.adminDashboard)
@@ -427,16 +432,28 @@ func (s *Server) dashboard(w http.ResponseWriter, r *http.Request) {
 					}
 				}
 			}
+			disconnected := entry.DesiredState == "disconnected" || entry.Status == "disconnected"
+			if !authorized && e == nil && disconnected {
+				continue
+			}
 			if !authorized {
 				entry.Usage = nil
 				entry.EnabledQueues = nil
 				entry.EnabledWorkflowAccess = ""
 				entry.EnabledWorkflowPath = ""
-				entry.Status = "permission-required"
-				entry.Message = "Current GitHub administration access could not be verified. Restore access or sign in again to view usage and manage queues."
+				if disconnected {
+					entry.Status = "disconnected"
+					entry.Message = "GitHub access could not be verified. This disconnected service remains stored for cleanup; no runner availability is inferred."
+				} else {
+					entry.Status = "permission-required"
+					entry.Message = "Current GitHub administration access could not be verified. Restore access or sign in again to view usage and manage queues."
+				}
 			}
 			p.Enrollments = append(p.Enrollments, entry)
 		}
+	}
+	if e == nil {
+		p.AccountUsage = append([]AccountUsage(nil), s.accountUsage...)
 	}
 	s.mu.Unlock()
 	s.render(w, p)

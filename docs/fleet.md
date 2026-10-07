@@ -91,3 +91,25 @@ history retains the latest report per observed minute for at most 24 hours and
 Running describes credentialed intent/connected/waiting VMs, not confirmed job
 execution. Offline workers contribute no observed warm counts; uncertain central
 assignments remain explicit. Samples older than three minutes are marked stale.
+
+User dashboard totals may also include configured operator-owned accounts that
+have no website enrollment. The private `/account-usage` endpoint accepts a full
+replacement array of verified snapshots: `observed_at`, numeric `installation_id`
+and `account_id`, `account_type`, the complete selected `repository_ids`, and
+seven bounded daily `usage` values. The collector must verify actual App
+installation identity and runner-group selected-repository access; never replace
+a broader ACL with an intersection. Omitted scopes disappear, and observations
+expire after five minutes. Personal snapshots require the signed-in owner;
+organization snapshots require current administration access to every repository
+in the verified scope. Scopes with unrestricted/all-repository visibility are
+excluded until a separately verified organization-wide authorization exists.
+Totals deduplicate enrollment snapshots and include shared organization reserved
+VM time. They do not identify which individual GitHub user triggered a job.
+
+Account snapshots may additionally contain `live_at` and `runners`, with supported
+`label`, `allocated`, and `credentialed` counts. These are scoped assigned-runner
+observations, not tenant-owned warm VM capacity. The user dashboard places this
+current activity beneath the account usage graph, followed by repository setup
+and service configuration status. Activity older than three minutes is unavailable;
+a fresh empty observation may report no assigned runners. Credentialed runners
+may be connecting or waiting and do not prove a GitHub job is executing.

@@ -115,7 +115,28 @@ func (p page) TotalUsage() Enrollment {
 		}
 	}
 	days := map[string]UsageDay{}
+	covered := map[string]bool{}
+	for _, snapshot := range p.AccountUsage {
+		if !snapshot.authorized(p) {
+			continue
+		}
+		covered[snapshot.key()] = true
+		for _, day := range snapshot.Usage {
+			total := days[day.Date]
+			total.Date = day.Date
+			total.VMSeconds += day.VMSeconds
+			total.VMs += day.VMs
+			days[day.Date] = total
+		}
+	}
 	for _, service := range visible.Services() {
+		key := fmt.Sprintf("repo:%d:%d", service.InstallationID, service.Repository.ID)
+		if service.Organization {
+			key = fmt.Sprintf("org:%d:%d", service.InstallationID, service.Account.ID)
+		}
+		if covered[key] {
+			continue
+		}
 		for _, day := range service.Usage {
 			total := days[day.Date]
 			total.Date = day.Date
