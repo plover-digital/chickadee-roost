@@ -13,6 +13,7 @@ func TestAccountUsagePrimaryScopeAuthorizationAndDedup(t *testing.T) {
 	account := Account{ID: 56267830, Type: "Organization"}
 	snapshot := AccountUsage{ObservedAt: now, InstallationID: 8, AccountID: account.ID, AccountType: account.Type, RepositoryIDs: []int64{99, 100}, Usage: []UsageDay{{Date: now.Format("2006-01-02"), VMSeconds: 600, VMs: 2}}}
 	p := page{User: &User{ID: 38401861}, AccountUsage: []AccountUsage{snapshot}, Choices: []Choice{{Installation: Installation{ID: 8, Account: account}, Repository: Repository{ID: 99}}}}
+	p.Enrollments = []Enrollment{{ID: "legacy", User: *p.User, Account: account, InstallationID: 8, Repository: Repository{ID: 99}, Usage: snapshot.Usage}}
 	if len(p.TotalUsage().Usage) != 0 {
 		t.Fatal("partial repository administration leaked org total")
 	}
@@ -25,7 +26,7 @@ func TestAccountUsagePrimaryScopeAuthorizationAndDedup(t *testing.T) {
 		t.Fatal("scope snapshot doubled")
 	}
 	p.AccountUsage[0].ObservedAt = now.Add(-6 * time.Minute)
-	p.Enrollments = nil
+	// Keep legacy rows: they must not bypass snapshot freshness.
 	if len(p.TotalUsage().Usage) != 0 {
 		t.Fatal("stale ACL published")
 	}

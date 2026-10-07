@@ -134,7 +134,9 @@ func (p page) TotalUsage() Enrollment {
 		if service.Organization {
 			key = fmt.Sprintf("org:%d:%d", service.InstallationID, service.Account.ID)
 		}
-		if covered[key] {
+		// Legacy organization usage has no complete repository ACL. Never let
+		// it bypass a denied, missing or expired authoritative snapshot.
+		if service.Organization || service.Account.ID != p.User.ID || covered[key] {
 			continue
 		}
 		for _, day := range service.Usage {

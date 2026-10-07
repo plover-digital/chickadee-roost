@@ -105,7 +105,7 @@ func (s *Server) loadAccountUsage() error {
 	if err != nil {
 		return err
 	}
-	if !ownedUsageFile(info) || info.Size() > 256*1024 {
+	if !ownedUsageFile(info) || info.Size() > 512*1024 {
 		return fmt.Errorf("invalid account usage store")
 	}
 	data, err := os.ReadFile(path)
