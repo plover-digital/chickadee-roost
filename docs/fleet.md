@@ -38,8 +38,12 @@ confirms exit before removing disks.
 SIGHUP changes queue policy and preserves assignments; existing queue identity
 and image changes require a controlled broker restart. SIGUSR1 drains central
 admission and waits for assignments. SIGTERM stops the broker while worker jobs
-continue. Worker SIGTERM drains its local pool. Keep stop timeouts consistent
-with job deadlines. Do not increment a worker generation with unresolved
+continue. Worker SIGTERM drains its local pool while keeping status available until jobs
+finish. Worker systemd units must use `KillMode=mixed`: TERM reaches the manager
+only, with final group KILL after the bounded stop timeout. Keep stop timeouts
+consistent with job deadlines. Roll workers one at a time and wait for
+authenticated inventory with READY capacity before stopping the next host;
+systemd active alone does not prove that image verification or boot is complete. Do not increment a worker generation with unresolved
 assignments; the initial generation is operator-managed, not automatic failover.
 
 The compatibility status/reload/usage files retain existing names for the bridge.
