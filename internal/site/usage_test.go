@@ -33,7 +33,7 @@ func TestUsageBoundsDatesAndChartValues(t *testing.T) {
 func TestUsageOperatorUpdateAndCustomerPrivacy(t *testing.T) {
 	s := fixture(t)
 	today := time.Now().UTC().Format("2006-01-02")
-	s.enrollments = []Enrollment{{ID: "own", User: User{ID: 7}, InstallationID: 8, Repository: Repository{ID: 99, Name: "tester/repo"}, Status: "pending", Queues: []string{"chickadee"}, DesiredState: "active"}, {ID: "other", User: User{ID: 8}, Repository: Repository{Name: "private-owner/hidden"}, Usage: []UsageDay{{Date: today, VMSeconds: 59940, VMs: 99}}}}
+	s.enrollments = []Enrollment{{ID: "own", User: User{ID: 7}, Account: Account{ID: 7, Type: "User"}, InstallationID: 8, Repository: Repository{ID: 99, Name: "tester/repo"}, Status: "pending", Queues: []string{"chickadee"}, DesiredState: "active"}, {ID: "other", User: User{ID: 8}, Repository: Repository{Name: "private-owner/hidden"}, Usage: []UsageDay{{Date: today, VMSeconds: 59940, VMs: 99}}}}
 	post := func(days []UsageDay) int {
 		b, _ := json.Marshal(map[string]any{"id": "own", "status": "active", "enabled_queues": []string{"chickadee"}, "usage": days})
 		w := httptest.NewRecorder()
