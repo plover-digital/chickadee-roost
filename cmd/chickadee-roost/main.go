@@ -104,7 +104,7 @@ func run(path string, c dispatch.FleetConfig) error {
 			return fmt.Errorf("missing or inconsistent recovery backend identity")
 		}
 		ic, stop := context.WithTimeout(ctx, 65*time.Second)
-		client, err := github.Existing(ic, saved.Queue)
+		client, err := github.Recover(ic, saved.Queue, saved.SetID)
 		stop()
 		if err != nil {
 			return err
@@ -213,6 +213,7 @@ func run(path string, c dispatch.FleetConfig) error {
 			}
 		}()
 	}
+	retries := map[string]queueRetry{}
 	reload := func() error {
 		next, hash, e := dispatch.LoadCatalog(path, c.ImageDigests)
 		if e != nil {
@@ -230,11 +231,12 @@ func run(path string, c dispatch.FleetConfig) error {
 					return fmt.Errorf("existing queue identity or image change requires broker restart")
 				}
 			} else {
-				ic, stop := context.WithTimeout(ctx, 65*time.Second)
-				client, e := github.New(ic, q)
-				stop()
+				client, e := prepareQueue(ctx, q, retries, time.Now(), github.New)
 				if e != nil {
 					return e
+				}
+				if client == nil {
+					continue
 				}
 				prepared[q.Key] = client
 			}
@@ -253,7 +255,9 @@ func run(path string, c dispatch.FleetConfig) error {
 		}
 		for _, q := range next {
 			if _, exists := polls[q.Key]; !exists {
-				start(q, prepared[q.Key])
+				if client := prepared[q.Key]; client != nil {
+					start(q, client)
+				}
 			}
 		}
 		for _, q := range next {
@@ -263,6 +267,11 @@ func run(path string, c dispatch.FleetConfig) error {
 		}
 		if err := writeJSON(c.StateDir, "backend-identities.json", archives); err != nil {
 			return err
+		}
+		for key := range retries {
+			if _, ok := wanted[key]; !ok {
+				delete(retries, key)
+			}
 		}
 		queues = next
 		return acknowledge(c.StatusDir, hash, "applied")
@@ -316,6 +325,16 @@ func run(path string, c dispatch.FleetConfig) error {
 			d.Profile = fleet.Profile{Digest: q.ImageDigest, Machine: q.Machine, CPUs: q.CPUs, MemoryMiB: q.MemoryMiB, DiskGiB: q.DiskGiB}
 			demands[v.key] = d
 		case <-tick.C:
+			if !draining {
+				for _, retry := range retries {
+					if !time.Now().Before(retry.Next) {
+						if err := reload(); err != nil {
+							slog.Warn("Queue retry deferred")
+						}
+						break
+					}
+				}
+			}
 			ds := []fleet.Demand{}
 			for _, q := range queues {
 				if d, ok := demands[q.Key]; ok {
@@ -337,7 +356,11 @@ func run(path string, c dispatch.FleetConfig) error {
 					}
 				}
 			}
-			if e = writeStatus(c.StatusDir, queues, demands, assignments, draining, broker.Telemetry()); e != nil {
+			initialized := map[string]bool{}
+			for key := range polls {
+				initialized[key] = true
+			}
+			if e = writeStatus(c.StatusDir, queues, demands, assignments, draining, broker.Telemetry(), initialized); e != nil {
 				return e
 			}
 			if draining {
@@ -388,7 +411,7 @@ func writeJSON(dir, name string, value any) error {
 	defer d.Close()
 	return d.Sync()
 }
-func writeStatus(dir string, queues []dispatch.Queue, demands map[string]fleet.Demand, assignments []fleet.Assignment, draining bool, telemetry fleet.Telemetry) error {
+func writeStatus(dir string, queues []dispatch.Queue, demands map[string]fleet.Demand, assignments []fleet.Assignment, draining bool, telemetry fleet.Telemetry, initialized map[string]bool) error {
 	qs := []map[string]any{}
 	for _, q := range queues {
 		allocated, spent := 0, 0
@@ -400,7 +423,7 @@ func writeStatus(dir string, queues []dispatch.Queue, demands map[string]fleet.D
 				}
 			}
 		}
-		qs = append(qs, map[string]any{"github_url": q.GitHubURL, "label": q.Label, "assigned_demand": demands[q.Key].Assigned, "allocated_vms": allocated, "ready_vms": 0, "credentialed_vms": spent})
+		qs = append(qs, map[string]any{"github_url": q.GitHubURL, "label": q.Label, "queue_initialized": initialized[q.Key], "assigned_demand": demands[q.Key].Assigned, "allocated_vms": allocated, "ready_vms": 0, "credentialed_vms": spent})
 	}
 	status := map[string]any{"updated_at": time.Now().UTC(), "draining": draining, "queues": qs}
 	if !telemetry.At.IsZero() {
@@ -411,4 +434,47 @@ func writeStatus(dir string, queues []dispatch.Queue, demands map[string]fleet.D
 
 func acknowledge(dir, hash, status string) error {
 	return writeJSON(dir, "reload.json", map[string]any{"config_sha256": hash, "status": status, "updated_at": time.Now().UTC()})
+}
+
+// Retry upstream failures without spinning or retaining removed queue intent.
+type queueRetry struct {
+	Queue dispatch.Queue
+	Next  time.Time
+	Delay time.Duration
+}
+
+func nextRetryDelay(previous time.Duration) time.Duration {
+	if previous < 15*time.Second {
+		return 15 * time.Second
+	}
+	return min(previous*2, 5*time.Minute)
+}
+
+// prepareQueue isolates transient/revoked GitHub scopes while retaining fatal
+// local configuration checks. It never generates or replays runner credentials.
+func prepareQueue(ctx context.Context, q dispatch.Queue, retries map[string]queueRetry, now time.Time, open func(context.Context, dispatch.Queue) (*github.Client, error)) (*github.Client, error) {
+	if retry, ok := retries[q.Key]; ok && retry.Queue == q && now.Before(retry.Next) {
+		return nil, nil
+	}
+	ic, stop := context.WithTimeout(ctx, 5*time.Second)
+	defer stop()
+	client, err := open(ic, q)
+	if err != nil {
+		if !errors.Is(err, github.ErrUnavailable) {
+			return nil, err
+		}
+		retry := retries[q.Key]
+		if retry.Queue != q {
+			retry.Delay = 0
+		}
+		retry.Queue = q
+		retry.Delay = nextRetryDelay(retry.Delay)
+		retry.Next = now.Add(retry.Delay)
+		retries[q.Key] = retry
+		sum := sha256.Sum256([]byte(q.Key))
+		slog.Warn("Queue initialization deferred; other queues preserved", "queue", hex.EncodeToString(sum[:8]), "retry_seconds", int(retry.Delay.Seconds()))
+		return nil, nil
+	}
+	delete(retries, q.Key)
+	return client, nil
 }

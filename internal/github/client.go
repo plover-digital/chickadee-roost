@@ -2,6 +2,7 @@ package github
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"github.com/actions/scaleset"
 	"github.com/plover-digital/chickadee-roost/internal/dispatch"
@@ -30,7 +31,50 @@ func New(ctx context.Context, c dispatch.Queue) (*Client, error) { return newCli
 func Existing(ctx context.Context, c dispatch.Queue) (*Client, error) {
 	return newClient(ctx, c, false)
 }
+
+// ErrUnavailable marks an upstream scope failure; local configuration errors stay fatal.
+var ErrUnavailable = errors.New("GitHub scope unavailable")
+
+// Recover retains the recorded scale-set identity without an upstream lookup.
+// Removal still verifies the runner belongs to this exact scale set.
+func Recover(ctx context.Context, q dispatch.Queue, setID int) (*Client, error) {
+	if setID <= 0 {
+		return nil, fmt.Errorf("invalid recovery scale set")
+	}
+	c, err := initialize(q)
+	if err != nil {
+		return nil, err
+	}
+	c.SetID = setID
+	return c, nil
+}
+
 func newClient(ctx context.Context, c dispatch.Queue, create bool) (*Client, error) {
+	client, err := initialize(c)
+	if err != nil {
+		return nil, err
+	}
+	api := client.API
+	set, e := api.GetRunnerScaleSet(ctx, c.RunnerGroupID, c.ScaleSet)
+	if e != nil {
+		return nil, fmt.Errorf("%w: scale set lookup failed", ErrUnavailable)
+	}
+	if set == nil && !create {
+		return client, nil
+	}
+	if set == nil {
+		set, e = api.CreateRunnerScaleSet(ctx, &scaleset.RunnerScaleSet{Name: c.ScaleSet, RunnerGroupID: c.RunnerGroupID, RunnerSetting: scaleset.RunnerSetting{DisableUpdate: true}})
+		if e != nil {
+			return nil, fmt.Errorf("%w: scale set creation failed", ErrUnavailable)
+		}
+	}
+	if !set.RunnerSetting.DisableUpdate {
+		return nil, fmt.Errorf("existing scale set must disable runner auto-update")
+	}
+	client.SetID = set.ID
+	return client, nil
+}
+func initialize(c dispatch.Queue) (*Client, error) {
 	u, e := url.Parse(c.GitHubURL)
 	if e != nil || u.Scheme != "https" || u.Host != "github.com" || u.User != nil || u.RawQuery != "" || u.Fragment != "" {
 		return nil, fmt.Errorf("prototype supports https://github.com org/repo scopes")
@@ -55,24 +99,9 @@ func newClient(ctx context.Context, c dispatch.Queue, create bool) (*Client, err
 	if e != nil {
 		return nil, fmt.Errorf("App client initialization failed")
 	}
-	set, e := api.GetRunnerScaleSet(ctx, c.RunnerGroupID, c.ScaleSet)
-	if e != nil {
-		return nil, fmt.Errorf("scale set lookup failed")
-	}
-	if set == nil && !create {
-		return &Client{API: api}, nil
-	}
-	if set == nil {
-		set, e = api.CreateRunnerScaleSet(ctx, &scaleset.RunnerScaleSet{Name: c.ScaleSet, RunnerGroupID: c.RunnerGroupID, RunnerSetting: scaleset.RunnerSetting{DisableUpdate: true}})
-		if e != nil {
-			return nil, fmt.Errorf("scale set creation failed")
-		}
-	}
-	if !set.RunnerSetting.DisableUpdate {
-		return nil, fmt.Errorf("existing scale set must disable runner auto-update")
-	}
-	return &Client{API: api, SetID: set.ID, GroupID: c.RunnerGroupID, SetName: c.ScaleSet}, nil
+	return &Client{API: api, GroupID: c.RunnerGroupID, SetName: c.ScaleSet}, nil
 }
+
 func (c *Client) JIT(ctx context.Context, name string) (string, error) {
 	j, e := c.API.GenerateJitRunnerConfig(ctx, &scaleset.RunnerScaleSetJitRunnerSetting{Name: name, WorkFolder: runnerWorkFolder}, c.SetID)
 	if e != nil || j == nil || j.EncodedJITConfig == "" {

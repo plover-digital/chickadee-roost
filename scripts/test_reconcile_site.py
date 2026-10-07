@@ -267,3 +267,23 @@ class FleetTelemetry(unittest.TestCase):
    self.assertIsNone(m.fleet_telemetry(tmp))
    (pathlib.Path(tmp)/'status.json').write_text(json.dumps({'queues':[]}))
    self.assertIsNone(m.fleet_telemetry(tmp))
+
+class QueueInitialization(unittest.TestCase):
+ def test_scope_initialization_and_legacy_compatibility(self):
+  import datetime
+  now=datetime.datetime.now(datetime.timezone.utc)
+  status={'updated_at':now.isoformat(),'queues':[
+   {'github_url':'https://github.com/example/repo','label':'chickadee','queue_initialized':False},
+   {'github_url':'https://github.com/example/repo','label':'other','queue_initialized':True},
+   {'github_url':'https://github.com/peer/repo','label':'chickadee','queue_initialized':True}]}
+  self.assertEqual(m.initialized_queues(status,'https://github.com/example/repo',['chickadee','other'],now),['other'])
+  status['queues'][0].pop('queue_initialized')
+  self.assertEqual(m.initialized_queues(status,'https://github.com/example/repo',['chickadee'],now),['chickadee'])
+ def test_missing_stale_and_malformed_fail_closed(self):
+  import datetime
+  now=datetime.datetime.now(datetime.timezone.utc)
+  self.assertEqual(m.initialized_queues(None,'https://github.com/example/repo',['chickadee'],now),[])
+  status={'updated_at':(now-datetime.timedelta(seconds=121)).isoformat(),'queues':[{'github_url':'https://github.com/example/repo','label':'chickadee','queue_initialized':True}]}
+  self.assertEqual(m.initialized_queues(status,'https://github.com/example/repo',['chickadee'],now),[])
+  status['updated_at']=now.isoformat();status['queues'][0]['queue_initialized']=1
+  self.assertEqual(m.initialized_queues(status,'https://github.com/example/repo',['chickadee'],now),[])

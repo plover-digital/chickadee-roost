@@ -113,3 +113,21 @@ current activity beneath the account usage graph, followed by repository setup
 and service configuration status. Activity older than three minutes is unavailable;
 a fresh empty observation may report no assigned runners. Credentialed runners
 may be connecting or waiting and do not prove a GitHub job is executing.
+
+### Queue initialization failures
+
+A revoked or temporarily unavailable GitHub scope does not stop other listeners.
+Upstream initialization failures retry after 15 seconds with exponential backoff
+capped at five minutes; each initialization attempt has a five-second deadline.
+Local configuration/key errors remain fatal. Existing journal recovery retains
+its recorded scale-set identity without an upstream lookup and never replays
+runner credentials.
+
+The compatibility `reload.json` acknowledgement means the queue catalog was
+accepted. It does not prove every GitHub listener initialized. New brokers add
+`queue_initialized` to each `status.json` queue: true means a listener was
+initialized, not that a runner connected or a job is executing. The admission
+bridge keeps unavailable queues pending, and treats missing or stale status as
+unavailable. Fresh older-broker queue entries without this field retain their
+previous interpretation. Deploy the broker first and then the bridge; there is
+no worker API or worker deployment change.

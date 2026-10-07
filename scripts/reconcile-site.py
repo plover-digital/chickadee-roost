@@ -109,6 +109,29 @@ def read_runner_status(runtime):
     return json.loads(raw)
 
 
+def initialized_queues(status, url, requested, now):
+    """Catalog acceptance does not prove listener initialization or job execution.
+
+    Fresh older-controller entries without queue_initialized retain compatibility;
+    missing/stale reports, absent queues and malformed flags fail closed.
+    """
+    import datetime
+    if not isinstance(status,dict):return []
+    try:
+        at=datetime.datetime.fromisoformat(status['updated_at'].replace('Z','+00:00'))
+        if at.tzinfo is None or not -60 <= (now-at).total_seconds() <= 120:return []
+        queues=status['queues']
+        if not isinstance(queues,list) or len(queues)>2048:return []
+        expected=url.lower().rstrip('/')
+        ready=set()
+        for queue in queues:
+            if not isinstance(queue,dict):return []
+            if queue.get('github_url','').lower().rstrip('/') != expected:continue
+            if queue.get('queue_initialized', True) is True:ready.add(queue.get('label'))
+        return [label for label in requested if label in ready]
+    except (KeyError,ValueError,TypeError,AttributeError):return []
+
+
 def runner_activity(status, scope, now):
     import datetime
     if status is None:return {}
@@ -544,6 +567,15 @@ def main():
                     if start<=completed<end:point['vms']+=1
                 days.append(point)
             update['usage']=days
+            if update['status']=='active':
+                try:applied_status=read_runner_status(candidate['state_dir'])
+                except Exception:applied_status=None
+                wanted=list(update.get('enabled_queues',[]))
+                available=initialized_queues(applied_status,url,wanted,datetime.datetime.now(datetime.timezone.utc))
+                update['enabled_queues']=available
+                if set(available)!=set(wanted):
+                    update['status']='pending'
+                    update['message']='Selected queue listeners are initializing or retrying GitHub access. Existing running jobs are preserved.'
             admin('status',update)
     print('managed reconciliation completed; requests='+str(len(updates)))
 
