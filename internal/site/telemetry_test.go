@@ -94,3 +94,15 @@ func TestTelemetryFullRetentionRoundtrip(t *testing.T) {
 		t.Fatal("full history restart", err)
 	}
 }
+
+func TestFleetChartShowsZeroBaselineAndTimeGaps(t *testing.T) {
+	now := time.Now().UTC()
+	samples := []FleetSample{{At: now.Add(-time.Hour), Ready: 4}, {At: now.Add(-59 * time.Minute), Ready: 4}, {At: now, Ready: 3, Running: 1}}
+	chart := makeFleetChart(samples, now)
+	if chart.Maximum != 4 || !strings.Contains(chart.AssignedPath, "210.00") || strings.Count(chart.AssignedPath, "M") != 2 || strings.Count(chart.ReadyPath, "M") != 2 {
+		t.Fatalf("missing zero baseline or reporting gap: %+v", chart)
+	}
+	if !strings.Contains(chart.AssignedPath, "930.00 165.00") {
+		t.Fatalf("incorrect final point: %s", chart.AssignedPath)
+	}
+}

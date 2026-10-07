@@ -4,10 +4,12 @@ import (
 	"bytes"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"net/http"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 )
 
@@ -137,6 +139,38 @@ func (s *Server) saveTelemetry(data []byte) error {
 	return dir.Sync()
 }
 
+type fleetChart struct {
+	AssignedPath, ReadyPath string
+	Maximum                 int
+	StartLabel, EndLabel    string
+}
+
+func makeFleetChart(samples []FleetSample, now time.Time) fleetChart {
+	start := now.Add(-24 * time.Hour)
+	chart := fleetChart{Maximum: 1, StartLabel: start.UTC().Format("Jan 2 15:04"), EndLabel: now.UTC().Format("Jan 2 15:04")}
+	for _, sample := range samples {
+		chart.Maximum = max(chart.Maximum, sample.Assigned(), sample.Ready)
+	}
+	var assigned, ready strings.Builder
+	var previous time.Time
+	for _, sample := range samples {
+		if sample.At.Before(start) || sample.At.After(now) {
+			continue
+		}
+		x := 50 + float64(sample.At.Sub(start))/float64(24*time.Hour)*880
+		command := "L"
+		if previous.IsZero() || sample.At.Sub(previous) > 3*time.Minute {
+			command = "M"
+		}
+		fmt.Fprintf(&assigned, "%s%.2f %.2f ", command, x, 210-float64(sample.Assigned())*180/float64(chart.Maximum))
+		fmt.Fprintf(&ready, "%s%.2f %.2f ", command, x, 210-float64(sample.Ready)*180/float64(chart.Maximum))
+		previous = sample.At
+	}
+	chart.AssignedPath = assigned.String()
+	chart.ReadyPath = ready.String()
+	return chart
+}
+
 type telemetryBar struct {
 	FleetSample
 	Height int
@@ -165,9 +199,17 @@ func (s *Server) adminDashboard(w http.ResponseWriter, r *http.Request) {
 		User    User
 		CSRF    string
 		Samples []telemetryBar
+		Recent  []FleetSample
+		Reports int
 		Current *FleetSample
 		Stale   bool
+		Chart   fleetChart
 	}{User: v.User, CSRF: v.CSRF, Samples: nil}
+	data.Chart = makeFleetChart(samples, time.Now())
+	data.Reports = len(samples)
+	for i := len(samples) - 1; i >= 0 && len(data.Recent) < 30; i-- {
+		data.Recent = append(data.Recent, samples[i])
+	}
 	max := 1
 	for _, sample := range samples {
 		if sample.Assigned() > max {
