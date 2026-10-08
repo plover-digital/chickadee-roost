@@ -189,6 +189,7 @@ func (s *Server) adminDashboard(w http.ResponseWriter, r *http.Request) {
 	}
 	s.mu.Lock()
 	samples := []FleetSample{}
+	stats := platformStatistics(s.enrollments, s.accountUsage, s.telemetry, time.Now())
 	for _, sample := range s.telemetry {
 		if !sample.At.Before(time.Now().Add(-24 * time.Hour)) {
 			samples = append(samples, sample)
@@ -196,6 +197,7 @@ func (s *Server) adminDashboard(w http.ResponseWriter, r *http.Request) {
 	}
 	s.mu.Unlock()
 	data := struct {
+		Stats   platformStats
 		User    User
 		CSRF    string
 		Samples []telemetryBar
@@ -204,7 +206,7 @@ func (s *Server) adminDashboard(w http.ResponseWriter, r *http.Request) {
 		Current *FleetSample
 		Stale   bool
 		Chart   fleetChart
-	}{User: v.User, CSRF: v.CSRF, Samples: nil}
+	}{Stats: stats, User: v.User, CSRF: v.CSRF, Samples: nil}
 	data.Chart = makeFleetChart(samples, time.Now())
 	data.Reports = len(samples)
 	for i := len(samples) - 1; i >= 0 && len(data.Recent) < 30; i-- {

@@ -92,6 +92,19 @@ Running describes credentialed intent/connected/waiting VMs, not confirmed job
 execution. Offline workers contribute no observed warm counts; uncertain central
 assignments remain explicit. Samples older than three minutes are marked stale.
 
+The administrator overview also derives enrollment counts (distinct verified
+request creators, connected GitHub accounts and repositories, and status counts)
+from persisted service records. Disconnection intent excludes an account/repository
+from connected counts; enrollment creator counts retain historical records.
+These are not all sign-ins or organization member counts. Seven-day usage sums
+fresh authoritative account snapshots once per scope, never repeated enrollment
+usage rows. Missing/stale scope snapshots are excluded and reporting coverage is
+shown. Completed VMs are not workflow-run, successful-job, or billing counts.
+The 24-hour peak and arithmetic average summarize observed reports only, excluding
+gaps; configured resource capacity and queue readiness are not inferred.
+This is a presentation-only change: existing private JSON contracts and deployment
+order are unchanged. Deploy the website independently of broker and workers.
+
 User dashboard totals may also include configured operator-owned accounts that
 have no website enrollment. The private `/account-usage` endpoint accepts a full
 replacement array of verified snapshots: `observed_at`, numeric `installation_id`
