@@ -1,6 +1,7 @@
 package usage
 
 import (
+	"github.com/plover-digital/chickadee/workerapi"
 	"os"
 	"path/filepath"
 	"testing"
@@ -42,5 +43,18 @@ func TestCompletedUsageIsPrivateAndIdempotent(t *testing.T) {
 	r.Completed = r.Reserved.Add(-time.Second)
 	if Append(dir, r) == nil {
 		t.Fatal("negative interval accepted")
+	}
+}
+
+func TestResourceSummaryUsageRoundtrip(t *testing.T) {
+	dir := t.TempDir()
+	now := time.Now().UTC()
+	r := Record{ID: "measured", Scope: "https://github.com/example", Label: "chickadee", Reserved: now.Add(-time.Minute), Completed: now, CPUs: 2, MemoryMiB: 4096, Resources: &workerapi.ResourceSummary{Version: 1, Samples: 3, DurationMillis: 2000, CPUUsec: 2000000, MemoryLimitBytes: 1 << 30}}
+	if err := Append(dir, r); err != nil {
+		t.Fatal(err)
+	}
+	rows, err := Load(dir)
+	if err != nil || len(rows) != 1 || rows[0].Resources == nil || rows[0].Resources.CPUUsec != 2000000 {
+		t.Fatal("resource roundtrip", err)
 	}
 }

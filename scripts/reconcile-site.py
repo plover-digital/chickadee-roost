@@ -156,6 +156,24 @@ def runner_activity(status, scope, now):
     return {'live_at':at.isoformat(),'runners':sorted(runners,key=lambda entry:entry['label'])}
 
 
+def resource_runs(records,scope,now):
+    import datetime
+    """Bounded completed VM summaries within the already verified scope ACL."""
+    expected=scope['github_url'].lower().rstrip('/')
+    rows=[];seen=set()
+    for record in records:
+        summary=record.get('resources')
+        if summary is None or record.get('github_url','').lower().rstrip('/')!=expected:continue
+        completed=datetime.datetime.fromisoformat(record['completed_at'].replace('Z','+00:00'))
+        if completed < now-datetime.timedelta(days=7) or completed>now+datetime.timedelta(minutes=1):continue
+        rid=record['id']
+        if rid in seen:raise ValueError('duplicate resource record')
+        seen.add(rid)
+        if not isinstance(summary,dict) or summary.get('version')!=1:raise ValueError('invalid resource summary')
+        rows.append({'id':rid,'label':record['label'],'completed_at':completed.isoformat(),'cpus':record['cpus'],'memory_mib':record['memory_mib'],'summary':summary})
+    return sorted(rows,key=lambda row:row['completed_at'],reverse=True)[:10]
+
+
 def collect_account_usage(config, records, jwt, api, now, status=None):
     scopes=config.get('scopes') or {'primary':config}
     if not isinstance(scopes,dict) or len(scopes)>64:raise ValueError('too many usage scopes')
@@ -163,6 +181,7 @@ def collect_account_usage(config, records, jwt, api, now, status=None):
     for scope in scopes.values():
         try:
             snapshot=account_usage_scope(scope,records,jwt,api,now)
+            snapshot["resources"]=resource_runs(records,scope,now)
             try:snapshot.update(runner_activity(status,scope,now))
             except Exception:
                 print('runner activity unavailable; usage snapshot retained',file=__import__('sys').stderr)

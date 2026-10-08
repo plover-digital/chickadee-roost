@@ -4,6 +4,7 @@ package fleet
 
 import (
 	"context"
+	"github.com/plover-digital/chickadee/workerapi"
 	"time"
 )
 
@@ -27,6 +28,7 @@ type Request struct {
 	CPUs, MemoryMiB, DiskGiB          int
 }
 type Record struct {
+	Resources   *workerapi.ResourceSummary `json:"Resources,omitempty"`
 	CompletedAt time.Time
 	Request     Request
 	State       string
@@ -67,6 +69,7 @@ type Demand struct {
 }
 type Limits struct{ MaxVMs, MaxCPUs, MaxMemoryMiB int }
 type Assignment struct {
+	Resources                                *workerapi.ResourceSummary `json:"Resources,omitempty"`
 	GitHubCompletedRevision                  uint64
 	CredentialUncertain                      bool
 	RegistrationCheckedAt                    time.Time

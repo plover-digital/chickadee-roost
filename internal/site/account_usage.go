@@ -19,6 +19,7 @@ type RunnerActivity struct {
 	Credentialed int    `json:"credentialed"`
 }
 type AccountUsage struct {
+	Resources      []ResourceRun    `json:"resources,omitempty"`
 	LiveAt         time.Time        `json:"live_at,omitempty"`
 	Runners        []RunnerActivity `json:"runners,omitempty"`
 	ObservedAt     time.Time        `json:"observed_at"`
@@ -41,6 +42,9 @@ func validAccountUsage(entries []AccountUsage, now time.Time) bool {
 	}
 	seen := map[string]bool{}
 	for _, a := range entries {
+		if !validResourceRuns(a.Resources, now) {
+			return false
+		}
 		if len(a.Runners) > 32 || a.LiveAt.After(now.Add(time.Minute)) || len(a.Runners) > 0 && a.LiveAt.IsZero() {
 			return false
 		}
@@ -105,7 +109,7 @@ func (s *Server) loadAccountUsage() error {
 	if err != nil {
 		return err
 	}
-	if !ownedUsageFile(info) || info.Size() > 512*1024 {
+	if !ownedUsageFile(info) || info.Size() > 2*1024*1024 {
 		return fmt.Errorf("invalid account usage store")
 	}
 	data, err := os.ReadFile(path)
@@ -119,6 +123,14 @@ func (s *Server) loadAccountUsage() error {
 	}
 	fresh := []AccountUsage{}
 	for i := range entries {
+		resourceRows := entries[i].Resources
+		entries[i].Resources = nil
+		for _, r := range resourceRows {
+			if r.CompletedAt.Before(time.Now().AddDate(0, 0, -7)) {
+				continue
+			}
+			entries[i].Resources = append(entries[i].Resources, r)
+		}
 		days := entries[i].Usage
 		entries[i].Usage = nil
 		for _, d := range days {
@@ -148,7 +160,7 @@ func ownedUsageFile(info os.FileInfo) bool {
 }
 func (s *Server) importAccountUsage(w http.ResponseWriter, r *http.Request) {
 	var entries []AccountUsage
-	d := json.NewDecoder(http.MaxBytesReader(w, r.Body, 256*1024))
+	d := json.NewDecoder(http.MaxBytesReader(w, r.Body, 1024*1024))
 	d.DisallowUnknownFields()
 	if d.Decode(&entries) != nil || d.Decode(new(any)) != io.EOF || !validAccountUsage(entries, time.Now()) {
 		http.Error(w, "Invalid account usage", 400)

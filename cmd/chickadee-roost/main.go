@@ -351,7 +351,7 @@ func run(path string, c dispatch.FleetConfig) error {
 			assignments := broker.Assignments()
 			for _, a := range assignments {
 				if a.Phase == fleet.Complete {
-					if e = usage.Append(c.StatusDir, usage.Record{ID: a.ID, Scope: a.ScopeURL, Label: a.Label, Reserved: a.ReservedAt, Completed: a.CompletedAt}); e != nil {
+					if e = usage.Append(c.StatusDir, usage.Record{ID: a.ID, Scope: a.ScopeURL, Label: a.Label, Reserved: a.ReservedAt, Completed: a.CompletedAt, Resources: a.Resources, CPUs: a.Profile.CPUs, MemoryMiB: a.Profile.MemoryMiB}); e != nil {
 						return fmt.Errorf("usage persistence failed")
 					}
 				}

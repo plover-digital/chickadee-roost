@@ -190,6 +190,10 @@ func (b *Broker) Sync(ctx context.Context, demands []Demand, workers map[string]
 		}
 		b.assignments[i].VMID = record.Request.VMID
 		if record.State == "terminal" {
+			if !record.Resources.Valid() {
+				continue
+			}
+			b.assignments[i].Resources = record.Resources
 			if b.assignments[i].CompletedAt.IsZero() {
 				completed := record.CompletedAt
 				if completed.IsZero() {

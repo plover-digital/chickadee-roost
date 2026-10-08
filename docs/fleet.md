@@ -144,3 +144,27 @@ bridge keeps unavailable queues pending, and treats missing or stale status as
 unavailable. Fresh older-broker queue entries without this field retain their
 previous interpretation. Deploy the broker first and then the bridge; there is
 no worker API or worker deployment change.
+
+## Host resource summaries
+
+Completed VM entries can include resource schema version 1 summaries from the
+public host API: credentialed-interval CPU usage/throttling, sampled memory charge,
+OOM-kill deltas and single-backing-device block I/O. The broker persists summaries
+only from identity-matched terminal worker records. No CPU/process/job-content
+inspection is performed in the guest; host device identifiers are not exposed.
+
+The collector attaches at most ten recent completed records per freshly verified
+account scope. The existing full selected-repository administration check guards
+both usage and resources; partial organization access reveals neither. The user
+dashboard shows the latest twenty visible records across scopes in expandable
+folds. Old runs without summaries remain unavailable, not zero. Sampling errors
+are explicit and host memory includes QEMU/cache rather than guest application RSS.
+
+Deploy readers before writers: website, upgraded broker/API client, collector,
+then drained workers one at a time. Worker API v1 adds optional terminal
+`resources` (schema version 1); strict older clients/journal readers need upgrading
+before summaries appear. Private `/account-usage` adds optional `resources`, with
+at most ten rows per scope, 64 scopes, a 1 MiB import and 2 MiB private-store limit.
+The broker's existing usage ledger retains its 8 MiB / 10000-record limits.
+No historical backfill is inferred. Resource collection itself needs no host
+network changes. See [host measurement semantics](https://github.com/plover-digital/chickadee/blob/main/docs/resource-metrics.md).

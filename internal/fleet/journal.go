@@ -118,6 +118,9 @@ func (b *Broker) save() error {
 	return directory.Sync()
 }
 func validAssignment(a Assignment) bool {
+	if !a.Resources.Valid() {
+		return false
+	}
 	if a.DemandRevision == 0 || a.LastDemandRevision < a.DemandRevision || (a.Phase == Complete || a.Phase == Terminal) && a.CompletedAt.IsZero() || a.ID == "" || a.RunnerName == "" || a.QueueID == "" || a.ScopeURL == "" || a.Label == "" || a.Worker.WorkerID == "" || a.Worker.BrokerID == "" || a.Worker.Generation == 0 || a.Profile.Digest == "" || a.Profile.CPUs < 1 || a.Profile.MemoryMiB < 512 || a.Profile.DiskGiB < 4 || a.ReservedAt.IsZero() || !a.CompletedAt.IsZero() && (a.CompletedAt.Before(a.ReservedAt) || a.CompletedAt.Sub(a.ReservedAt) > 25*time.Hour) {
 		return false
 	}

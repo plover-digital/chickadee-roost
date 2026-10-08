@@ -20,7 +20,7 @@ func (w RemoteWorker) PlacementPriority() int { return w.Priority }
 
 func record(r workerapi.Record) fleet.Record {
 	q := r.Request
-	return fleet.Record{Request: fleet.Request{Identity: fleet.Identity{WorkerID: q.Identity.WorkerID, BrokerID: q.Identity.BrokerID, Generation: q.Identity.Generation}, AssignmentID: q.AssignmentID, VMID: q.VMID, ProfileDigest: q.ProfileDigest, CPUs: q.CPUs, MemoryMiB: q.MemoryMiB, DiskGiB: q.DiskGiB}, State: r.State, CompletedAt: r.CompletedAt}
+	return fleet.Record{Request: fleet.Request{Identity: fleet.Identity{WorkerID: q.Identity.WorkerID, BrokerID: q.Identity.BrokerID, Generation: q.Identity.Generation}, AssignmentID: q.AssignmentID, VMID: q.VMID, ProfileDigest: q.ProfileDigest, CPUs: q.CPUs, MemoryMiB: q.MemoryMiB, DiskGiB: q.DiskGiB}, State: r.State, CompletedAt: r.CompletedAt, Resources: r.Resources}
 }
 func (w RemoteWorker) Inventory(ctx context.Context) (fleet.Inventory, error) {
 	ctx, cancel := context.WithTimeout(ctx, 3*time.Second)
