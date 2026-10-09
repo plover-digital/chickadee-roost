@@ -168,3 +168,10 @@ at most ten rows per scope, 64 scopes, a 1 MiB import and 2 MiB private-store li
 The broker's existing usage ledger retains its 8 MiB / 10000-record limits.
 No historical backfill is inferred. Resource collection itself needs no host
 network changes. See [host measurement semantics](https://github.com/plover-digital/chickadee/blob/main/docs/resource-metrics.md).
+
+macOS queue preparation: `chickadee-small-macos-26` is reserved as an opt-in
+ARM64 macOS label. The prepared dashboard placeholder is disabled and has no
+submitted queue value; server-side enrollment rejects this unsupported label.
+Do not enable it until a platform-aware Apple-native worker and image exist and
+one-job/bootstrap/isolation acceptance has passed. The Linux `chickadee` default
+is unaffected. A disabled placeholder is not admission or capacity proof.
