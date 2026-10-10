@@ -35,6 +35,7 @@ type Config struct {
 	AppID                                                int64
 	AdminUserID                                          int64
 	AutomaticActivation                                  bool
+	MacOSPreview                                         bool
 }
 type User struct {
 	ID    int64  `json:"id"`
@@ -127,6 +128,7 @@ type page struct {
 	IsAdmin              bool
 	AccountUsage         []AccountUsage
 	AutomaticActivation  bool
+	MacOSPreview         bool
 }
 
 func New(c Config) (*Server, error) {
@@ -242,6 +244,7 @@ func (s *Server) render(w http.ResponseWriter, p page) {
 	p.IsAdmin = p.User != nil && s.cfg.AdminUserID > 0 && p.User.ID == s.cfg.AdminUserID
 	p.LoginReady = s.ready()
 	p.AutomaticActivation = s.cfg.AutomaticActivation
+	p.MacOSPreview = s.cfg.MacOSPreview
 	var b bytes.Buffer
 	if e := s.templates.ExecuteTemplate(&b, "page.html", p); e != nil {
 		http.Error(w, "Page unavailable", 500)
@@ -405,7 +408,7 @@ func (s *Server) dashboard(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	choices, e := s.choices(r.Context(), v)
-	p := page{Title: "Your repositories", User: &v.User, CSRF: v.CSRF, Choices: choices, ExtraQueues: extraQueues}
+	p := page{Title: "Your repositories", User: &v.User, CSRF: v.CSRF, Choices: choices, ExtraQueues: queueCatalog(s.cfg.MacOSPreview), MacOSPreview: s.cfg.MacOSPreview}
 	if e != nil {
 		p.Message = "GitHub access could not be verified. Sign in again, or check your App installation permissions."
 	}
@@ -475,7 +478,29 @@ func (s *Server) postSession(w http.ResponseWriter, r *http.Request) (string, se
 var extraQueues = []string{"chickadee-small-rocky-102", "chickadee-medium-rocky-102", "chickadee-small-ubuntu-2404", "chickadee-medium-ubuntu-2404", "chickadee-small-ubuntu-2604", "chickadee-medium-ubuntu-2604"}
 
 func requestedQueues(values []string) ([]string, error) {
-	if len(values) > len(extraQueues)+1 {
+	return requestedQueuesFor(values, false)
+}
+func queueCatalog(mac bool) []string {
+	result := append([]string(nil), extraQueues...)
+	if mac {
+		result = append(result, "chickadee-small-macos-26")
+	}
+	return result
+}
+func knownQueue(q string) bool {
+	if q == "chickadee" || q == "chickadee-small-macos-26" {
+		return true
+	}
+	for _, label := range extraQueues {
+		if q == label {
+			return true
+		}
+	}
+	return false
+}
+func requestedQueuesFor(values []string, mac bool) ([]string, error) {
+	catalog := queueCatalog(mac)
+	if len(values) > len(catalog)+1 {
 		return nil, errors.New("too many queues")
 	}
 	queues := []string{"chickadee"}
@@ -484,7 +509,7 @@ func requestedQueues(values []string) ([]string, error) {
 			continue
 		}
 		valid := false
-		for _, allowed := range extraQueues {
+		for _, allowed := range catalog {
 			if q == allowed {
 				valid = true
 				break
@@ -512,7 +537,7 @@ func (s *Server) enroll(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	queues, err := requestedQueues(r.PostForm["queue"])
+	queues, err := requestedQueuesFor(r.PostForm["queue"], s.cfg.MacOSPreview)
 	if err != nil {
 		http.Error(w, "Invalid queue selection", 400)
 		return

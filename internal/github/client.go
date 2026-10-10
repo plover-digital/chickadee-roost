@@ -14,10 +14,11 @@ import (
 )
 
 type Client struct {
-	API     *scaleset.Client
-	SetID   int
-	GroupID int
-	SetName string
+	API       *scaleset.Client
+	SetID     int
+	GroupID   int
+	SetName   string
+	NativeMac bool
 }
 
 // Actions cache archives paths relative to GITHUB_WORKSPACE. Match the hosted
@@ -99,11 +100,15 @@ func initialize(c dispatch.Queue) (*Client, error) {
 	if e != nil {
 		return nil, fmt.Errorf("App client initialization failed")
 	}
-	return &Client{API: api, GroupID: c.RunnerGroupID, SetName: c.ScaleSet}, nil
+	return &Client{API: api, GroupID: c.RunnerGroupID, SetName: c.ScaleSet, NativeMac: c.Machine == "apple-vz"}, nil
 }
 
 func (c *Client) JIT(ctx context.Context, name string) (string, error) {
-	j, e := c.API.GenerateJitRunnerConfig(ctx, &scaleset.RunnerScaleSetJitRunnerSetting{Name: name, WorkFolder: runnerWorkFolder}, c.SetID)
+	workFolder := runnerWorkFolder
+	if c.NativeMac {
+		workFolder = "/Users/runner/work"
+	}
+	j, e := c.API.GenerateJitRunnerConfig(ctx, &scaleset.RunnerScaleSetJitRunnerSetting{Name: name, WorkFolder: workFolder}, c.SetID)
 	if e != nil || j == nil || j.EncodedJITConfig == "" {
 		return "", fmt.Errorf("JIT generation failed")
 	}

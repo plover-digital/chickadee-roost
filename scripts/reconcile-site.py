@@ -358,11 +358,18 @@ def install_live_config(candidate, path):
         raise LiveReloadUncertain('live update was not acknowledged; previous runtime restored')
 
 
-def install_config(candidate,path,quarantine,live_reload=False):
+def validation_command(stage,fleet_file=None):
+    if fleet_file is not None:
+        fleet=pathlib.Path(fleet_file)
+        if not fleet.is_absolute() or not fleet.is_file():raise ValueError('explicit fleet validator configuration required')
+        return ['/usr/local/bin/chickadee-roost','-catalog',str(stage),'-fleet',str(fleet),'-check']
+    return ['/usr/local/bin/chickadee','-config',str(stage),'-check']
+
+def install_config(candidate,path,quarantine,live_reload=False,fleet_file=None):
     encoded=json.dumps(candidate,indent=2)+'\n'
     with tempfile.TemporaryDirectory(prefix='chickadee-config-') as tmp:
         stage=pathlib.Path(tmp)/'config.json';stage.write_text(encoded);stage.chmod(0o600)
-        subprocess.run(['/usr/local/bin/chickadee','-config',str(stage),'-check'],check=True)
+        subprocess.run(validation_command(stage,fleet_file),check=True)
         # Drain main process only. Never terminate a job for onboarding changes.
         state=subprocess.check_output(['systemctl','show','chickadee','-p','ActiveState','--value'],text=True).strip()
         if state=='activating':raise RuntimeError('controller still starting; retry later')
@@ -541,7 +548,7 @@ def main():
                 if candidate.get('scopes',{}).get(name)==original.get('scopes',{}).get(name):continue
                 admin('status',{'id':update['id'],'status':'approved','enabled_queues':list(original.get('scopes',{}).get(name,{}).get('profiles',{})),
                      'message':'Approved; activating selected queues in the shared fleet.' if policy.get('live_reload') is True and not quarantine else 'Approved; provisioning the selected queues after running jobs finish.'})
-        install_config(candidate,path,quarantine,live_reload=policy.get('live_reload',False) is True)
+        install_config(candidate,path,quarantine,live_reload=policy.get('live_reload',False) is True,fleet_file=policy.get('fleet_file'))
     if site_available:
         # Observability failures must not block unrelated customer admission.
         try:

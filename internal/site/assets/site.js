@@ -4,7 +4,7 @@ const os = document.getElementById('os');
 const label = document.getElementById('label');
 const copy = document.getElementById('copy');
 if (size && os && label && copy) {
-  const update = () => { label.textContent = `runs-on: chickadee-${size.value}-${os.value}`; };
+  const update = () => { const mac = os.value === 'macos-26'; size.querySelector('option[value=medium]').disabled = mac; if (mac) size.value = 'small'; label.textContent = `runs-on: chickadee-${size.value}-${os.value}`; };
   size.addEventListener('change', update);
   os.addEventListener('change', update);
   copy.addEventListener('click', async () => {

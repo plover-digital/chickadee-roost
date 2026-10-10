@@ -169,9 +169,21 @@ The broker's existing usage ledger retains its 8 MiB / 10000-record limits.
 No historical backfill is inferred. Resource collection itself needs no host
 network changes. See [host measurement semantics](https://github.com/plover-digital/chickadee/blob/main/docs/resource-metrics.md).
 
-macOS queue preparation: `chickadee-small-macos-26` is reserved as an opt-in
-ARM64 macOS label. The prepared dashboard placeholder is disabled and has no
-submitted queue value; server-side enrollment rejects this unsupported label.
-Do not enable it until a platform-aware Apple-native worker and image exist and
-one-job/bootstrap/isolation acceptance has passed. The Linux `chickadee` default
-is unaffected. A disabled placeholder is not admission or capacity proof.
+macOS preview integration: `chickadee-small-macos-26` is an opt-in ARM64
+label. `CHICKADEE_MACOS_PREVIEW=1` enables the website option and server-side
+request validation; without it the placeholder remains disabled. This flag does
+not create capacity. Configure an `apple-vz` worker and matching immutable image
+profile, validate one-job routing/cleanup, and provide the backend admission
+profile before enabling it. Default Linux queues remain unchanged.
+
+Worker API v1 adds the `apple-vz` machine enum. Upgrade Roost's pinned Chickadee
+dependency before adding Mac inventory; older clients reject it. Match machine,
+image digest and resources together, with no Linux fallback. Mac JIT uses
+`/Users/runner/work`. The current native worker offers one shared 2-vCPU/4-GiB
+VM and ten-minute jobs, with Xcode CLI/software parity explicitly in preview.
+
+Managed admission can set private policy `fleet_file` to an absolute fleet JSON
+path. Candidate validation then uses `chickadee-roost -catalog ... -fleet ...
+-check`; standalone deployments retain the existing controller validator. Deploy
+this helper/policy before accepting Mac requests. No worker API fields or stored
+enrollment schema change.

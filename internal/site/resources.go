@@ -22,7 +22,7 @@ func validResourceRuns(runs []ResourceRun, now time.Time) bool {
 	}
 	seen := map[string]bool{}
 	for _, r := range runs {
-		label := r.Label == "chickadee"
+		label := knownQueue(r.Label)
 		for _, q := range extraQueues {
 			if r.Label == q {
 				label = true

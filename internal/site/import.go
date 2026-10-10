@@ -47,7 +47,7 @@ func (s *Server) importEnrollment(w http.ResponseWriter, r *http.Request) {
 	if entry.EnabledWorkflowPath == "" {
 		entry.EnabledWorkflowPath = entry.WorkflowPath
 	}
-	queues, e := requestedQueues(entry.Queues)
+	queues, e := requestedQueuesFor(entry.Queues, s.cfg.MacOSPreview)
 	if e != nil {
 		http.Error(w, "Invalid requested queues", 400)
 		return

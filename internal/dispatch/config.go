@@ -109,7 +109,7 @@ func LoadCatalog(path string, digests map[string]string) ([]Queue, string, error
 			im, ok := c.Images[p.Image]
 			r, rok := c.Resources[p.Resources]
 			digest := digests[p.Image]
-			if !labelPattern.MatchString(label) || !ok || !rok || !digestPattern.MatchString(digest) || (im.Machine != "q35" && im.Machine != "microvm") || p.Max < 1 || p.Max > 32 || r.CPUs < 1 || r.CPUs > 32 || r.MemoryMiB < 512 || r.MemoryMiB > 131072 || im.DiskGiB < 8 || im.DiskGiB > 128 {
+			if !labelPattern.MatchString(label) || !ok || !rok || !digestPattern.MatchString(digest) || (im.Machine != "q35" && im.Machine != "microvm" && im.Machine != "apple-vz") || p.Max < 1 || p.Max > 32 || r.CPUs < 1 || r.CPUs > 32 || r.MemoryMiB < 512 || r.MemoryMiB > 131072 || im.DiskGiB < 8 || im.DiskGiB > 128 {
 				return nil, "", fmt.Errorf("invalid profile or missing immutable image digest")
 			}
 			scope := strings.ToLower(strings.TrimRight(s.GitHubURL, "/"))

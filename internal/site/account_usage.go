@@ -50,7 +50,7 @@ func validAccountUsage(entries []AccountUsage, now time.Time) bool {
 		}
 		labels := map[string]bool{}
 		for _, runner := range a.Runners {
-			allowed := runner.Label == "chickadee"
+			allowed := knownQueue(runner.Label)
 			for _, label := range extraQueues {
 				if runner.Label == label {
 					allowed = true
