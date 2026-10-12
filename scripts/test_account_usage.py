@@ -59,6 +59,14 @@ class AccountUsageTests(unittest.TestCase):
         status['queues'][0].update(allocated_vms=2,credentialed_vms=1)
         self.assertEqual(m.runner_activity(status,scope,self.now)['runners'],[{'label':'chickadee','allocated':2,'credentialed':1}])
         self.assertNotIn('github_url',str(m.runner_activity(status,scope,self.now)))
+    def test_mac_activity_requires_scope_authorization(self):
+        label='chickadee-small-macos-26'
+        scope={**self.scope,'profiles':{label:{}}}
+        status={'updated_at':self.now.isoformat(),'queues':[{'github_url':scope['github_url'],'label':label,'allocated_vms':1,'credentialed_vms':1}]}
+        self.assertEqual(m.runner_activity(status,scope,self.now)['runners'],[{'label':label,'allocated':1,'credentialed':1}])
+        scope['profiles']={'chickadee':{}}
+        with self.assertRaises(ValueError):m.runner_activity(status,scope,self.now)
+
     def test_runner_activity_stale_missing_and_invalid(self):
         scope={**self.scope,'profiles':{'chickadee':{}}}
         self.assertEqual(m.runner_activity(None,scope,self.now),{})

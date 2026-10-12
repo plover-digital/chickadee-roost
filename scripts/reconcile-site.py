@@ -143,7 +143,7 @@ def runner_activity(status, scope, now):
     if not isinstance(queues,list) or len(queues)>2048:raise ValueError('invalid runner status queues')
     expected=scope['github_url'].lower().rstrip('/')
     allowed=set(scope.get('profiles',{}))
-    known={'chickadee',*(f'chickadee-{size}-{os}' for size in ('small','medium') for os in ('rocky-102','ubuntu-2404','ubuntu-2604'))}
+    known={'chickadee','chickadee-small-macos-26',*(f'chickadee-{size}-{os}' for size in ('small','medium') for os in ('rocky-102','ubuntu-2404','ubuntu-2604'))}
     runners=[];seen=set()
     for queue in queues:
         if not isinstance(queue,dict):raise ValueError('invalid runner status queue')
