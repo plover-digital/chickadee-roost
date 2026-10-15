@@ -235,7 +235,11 @@ def scope_name(entry):
     return ('org-'+str(entry['account']['id']) if entry['account']['type']=='Organization' else 'repo-'+str(entry['repository']['id']))
 
 
-def validate_scope_merge(previous, entry):
+def validate_scope_merge(previous, entry, authenticated=False):
+    # A personal owner may reinstall the App after disconnecting. The new
+    # installation is still checked against GitHub before any scope is applied.
+    if previous is not None and authenticated and entry.get('account',{}).get('type')=='User' and previous.get('account',{}).get('type')=='User' and previous.get('desired_state')=='disconnected' and not previous.get('enabled_queues') and previous['user']['id']==entry['user']['id']==previous['account']['id']==entry['account']['id'] and previous['repository']['id']==entry['repository']['id']:
+        return
     if previous is not None and (previous['user']['id']!=entry['user']['id'] or previous['installation_id']!=entry['installation_id'] or previous['repository']['id']!=entry['repository']['id']):
         raise ValueError('conflicting scope owners or repositories require operator review')
 
@@ -250,12 +254,12 @@ def merge_site_requests(entries, policy, catalog, site_available, original):
         if approved_request(entry,policy,catalog,authenticated=trusted) is None:continue
         name=scope_name(entry);previous=requests_by_scope.get(name)
         try:
-            validate_scope_merge(previous,entry)
+            validate_scope_merge(previous,entry,authenticated=trusted)
         except ValueError:
             # Keep the established scope and let unrelated enrollments progress.
             if entry.get('id'):
                 updates.append({'id':entry['id'],'status':'error','enabled_queues':[],
-                    'message':'This organization already has a different repository or requester configured. Only one repository per organization is supported; contact the operator to replace it.'})
+                    'message':('This organization already has a different repository or requester configured. Only one repository per organization is supported; contact the operator to replace it.' if entry['account']['type']=='Organization' else 'This repository has a conflicting requester or App installation. Disconnect the previous service before reconnecting; contact the operator if it persists.')})
             continue
         merged=dict(entry)
         if previous is not None and not merged.get('workflow_path') and previous['repository']['id']==entry['repository']['id'] and previous.get('workflow_path'):

@@ -287,3 +287,18 @@ class QueueInitialization(unittest.TestCase):
   self.assertEqual(m.initialized_queues(status,'https://github.com/example/repo',['chickadee'],now),[])
   status['updated_at']=now.isoformat();status['queues'][0]['queue_initialized']=1
   self.assertEqual(m.initialized_queues(status,'https://github.com/example/repo',['chickadee'],now),[])
+
+class PersonalReinstallation(unittest.TestCase):
+ def test_authenticated_reinstall_replaces_disconnected_owner_record(self):
+  import copy
+  old={'id':'old','authenticated':True,'user':{'id':7},'account':{'id':7,'type':'User'},'installation_id':10,'repository':{'id':99},'desired_state':'disconnected','enabled_queues':[]}
+  new=copy.deepcopy(old);new.update(id='new',installation_id=11,desired_state='active')
+  policy={'auto_approve_authenticated':True}
+  requests,trusted,updates=m.merge_site_requests([old,new],policy,{'chickadee':{}},True,{})
+  self.assertEqual([r['id'] for r in requests],['new']);self.assertEqual(trusted,{'repo-99'});self.assertEqual(updates,[])
+  for change in [{'desired_state':'active'},{'enabled_queues':['chickadee']}]:
+   previous=copy.deepcopy(old);previous.update(change)
+   with self.assertRaises(ValueError):m.validate_scope_merge(previous,new,authenticated=True)
+  with self.assertRaises(ValueError):m.validate_scope_merge(old,new,authenticated=False)
+  other=copy.deepcopy(new);other['user']['id']=8
+  with self.assertRaises(ValueError):m.validate_scope_merge(old,other,authenticated=True)
