@@ -225,6 +225,9 @@ func pollMessagesStats(ctx context.Context, session messageSession, max int, emi
 		// Local capacity bounds runners, not ownership of queued requests.
 		var ids []int64
 		for _, j := range m.JobAvailableMessages {
+			if j == nil {
+				return fmt.Errorf("invalid available job record")
+			}
 			ids = append(ids, j.RunnerRequestID)
 		}
 		if m.Statistics != nil {
