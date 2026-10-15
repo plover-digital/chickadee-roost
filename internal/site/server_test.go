@@ -153,7 +153,7 @@ func TestPageHeadersAndInstallTarget(t *testing.T) {
 	if rec.Header().Get("Referrer-Policy") != "same-origin" {
 		t.Fatal("native same-origin forms require a nonopaque Origin policy")
 	}
-	if rec.Code != 200 || !strings.Contains(rec.Body.String(), "Continue with GitHub") || !strings.Contains(rec.Header().Get("Content-Security-Policy"), "frame-ancestors 'none'") {
+	if rec.Code != 200 || !strings.Contains(rec.Body.String(), "Sign in with GitHub") || !strings.Contains(rec.Header().Get("Content-Security-Policy"), "frame-ancestors 'none'") {
 		t.Fatal("page/headers missing")
 	}
 	rec = httptest.NewRecorder()

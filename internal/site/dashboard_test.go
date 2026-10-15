@@ -1,6 +1,7 @@
 package site
 
 import (
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -38,5 +39,43 @@ func TestDashboardWorkflowContainsOnlyEnabledQueues(t *testing.T) {
 	s.ServeHTTP(rec, req)
 	if strings.Contains(rec.Body.String(), "workflow-queue") || !strings.Contains(rec.Body.String(), "awaiting beta approval") {
 		t.Fatal("pending enrollment offers executable workflow")
+	}
+}
+
+func TestDashboardInstallPromptRequiresSuccessfulGitHubLookup(t *testing.T) {
+	for _, stage := range []string{"empty", "installations-error", "repositories-error"} {
+		t.Run(stage, func(t *testing.T) {
+			s := fixture(t)
+			s.sessions["session"] = session{User: User{7, "tester"}, Token: "fixture", CSRF: "csrf", Expires: time.Now().Add(time.Hour)}
+			s.http.Transport = transport(func(r *http.Request) (*http.Response, error) {
+				if stage == "installations-error" || (stage == "repositories-error" && strings.HasPrefix(r.URL.Path, "/user/installations/")) {
+					return nil, fmt.Errorf("upstream unavailable")
+				}
+				if stage == "empty" {
+					return response(`{"total_count":0,"installations":[]}`), nil
+				}
+				return response(`{"total_count":1,"installations":[{"id":8,"app_id":42,"account":{"id":7,"login":"tester","type":"User"}}]}`), nil
+			})
+			req := httptest.NewRequest("GET", "/dashboard", nil)
+			req.AddCookie(&http.Cookie{Name: "__Host-chickadee-session", Value: "session"})
+			rec := httptest.NewRecorder()
+			s.ServeHTTP(rec, req)
+			body := rec.Body.String()
+			if rec.Code != http.StatusOK {
+				t.Fatal(rec.Code)
+			}
+			if stage == "empty" {
+				if !strings.Contains(body, `id="finish-setup"`) || !strings.Contains(body, `href="/install"`) {
+					t.Fatal("successful empty lookup lost installation guidance")
+				}
+			} else {
+				if strings.Contains(body, `id="finish-setup"`) || strings.Contains(body, `href="/install"`) || strings.Contains(body, `action="/enroll"`) {
+					t.Fatal("lookup failure offered installation or enrollment")
+				}
+				if !strings.Contains(body, "Repository setup is unavailable") || !strings.Contains(body, "retry the lookup") {
+					t.Fatal("verification failure lost retry guidance")
+				}
+			}
+		})
 	}
 }
