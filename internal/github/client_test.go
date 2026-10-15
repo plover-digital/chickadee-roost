@@ -233,3 +233,19 @@ func TestInvalidAvailableJobIsRejectedBeforeAcquisitionOrAcknowledgement(t *test
 		}
 	}
 }
+
+func TestOversizedAvailabilityRejectedBeforeSideEffects(t *testing.T) {
+	s := &delayedSession{message: &scaleset.RunnerScaleSetMessage{Statistics: &scaleset.RunnerScaleSetStatistic{TotalAssignedJobs: 1}, JobAvailableMessages: make([]*scaleset.JobAvailable, maxAvailableJobs+1)}, acquiring: make(chan []int64, 1), release: make(chan struct{}), acknowledged: make(chan struct{}, 1)}
+	job := &scaleset.JobAvailable{JobMessageBase: scaleset.JobMessageBase{RunnerRequestID: 1}}
+	for i := range s.message.JobAvailableMessages {
+		s.message.JobAvailableMessages[i] = job
+	}
+	close(s.release)
+	err := pollMessagesStats(context.Background(), s, 1, func(DemandStatistics) error { t.Fatal("oversized batch emitted demand"); return nil })
+	if err == nil || err.Error() != "availability batch too large" {
+		t.Fatal("oversized batch accepted", err)
+	}
+	if len(s.acquiring) != 0 || len(s.acknowledged) != 0 {
+		t.Fatal("oversized batch acquired or acknowledged")
+	}
+}

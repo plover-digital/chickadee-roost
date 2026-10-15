@@ -211,6 +211,11 @@ func pollMessages(ctx context.Context, session messageSession, max int, desired 
 		}
 	})
 }
+
+// maxAvailableJobs bounds an upstream batch independently of local VM capacity.
+// Oversized batches are rejected without acknowledgement, never truncated.
+const maxAvailableJobs = 10000
+
 func pollMessagesStats(ctx context.Context, session messageSession, max int, emit func(DemandStatistics) error) error {
 	last := 0
 	for {
@@ -220,6 +225,9 @@ func pollMessagesStats(ctx context.Context, session messageSession, max int, emi
 		}
 		if m == nil {
 			continue
+		}
+		if len(m.JobAvailableMessages) > maxAvailableJobs {
+			return fmt.Errorf("availability batch too large")
 		}
 		// Acquire the entire offered backlog before acknowledging this message.
 		// Local capacity bounds runners, not ownership of queued requests.
