@@ -2,6 +2,8 @@ package github
 
 import (
 	"context"
+	"errors"
+	"fmt"
 	"path/filepath"
 	"reflect"
 	"testing"
@@ -26,10 +28,12 @@ func TestHostedHomeCacheRestoresToRunnerHome(t *testing.T) {
 }
 
 type delayedSession struct {
-	message   *scaleset.RunnerScaleSetMessage
-	fetched   bool
-	acquiring chan []int64
-	release   chan struct{}
+	message      *scaleset.RunnerScaleSetMessage
+	fetched      bool
+	acquiring    chan []int64
+	release      chan struct{}
+	acquireErr   error
+	acknowledged chan struct{}
 }
 
 func (s *delayedSession) GetMessage(ctx context.Context, _, _ int) (*scaleset.RunnerScaleSetMessage, error) {
@@ -44,12 +48,17 @@ func (s *delayedSession) AcquireJobs(ctx context.Context, ids []int64) ([]int64,
 	s.acquiring <- ids
 	select {
 	case <-s.release:
-		return ids, nil
+		return ids, s.acquireErr
 	case <-ctx.Done():
 		return nil, ctx.Err()
 	}
 }
-func (s *delayedSession) DeleteMessage(context.Context, int) error { return nil }
+func (s *delayedSession) DeleteMessage(context.Context, int) error {
+	if s.acknowledged != nil {
+		s.acknowledged <- struct{}{}
+	}
+	return nil
+}
 
 func TestAssignedDemandDoesNotWaitForAcquisition(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
@@ -68,8 +77,8 @@ func TestAssignedDemandDoesNotWaitForAcquisition(t *testing.T) {
 	}
 	select {
 	case ids := <-s.acquiring:
-		if !reflect.DeepEqual(ids, []int64{42}) {
-			t.Fatalf("capacity not respected: %v", ids)
+		if !reflect.DeepEqual(ids, []int64{42, 43}) {
+			t.Fatalf("offered requests dropped: %v", ids)
 		}
 	case <-time.After(time.Second):
 		t.Fatal("acquisition never started")
@@ -127,5 +136,116 @@ func TestCompletionMetadataDoesNotBecomeDemand(t *testing.T) {
 	})
 	if err == nil {
 		t.Fatal("cancellation lost")
+	}
+}
+
+func TestBurstAcquisitionPreservesBacklogAndCompletionMetadata(t *testing.T) {
+	for _, assigned := range []int{0, 1, 5} {
+		for _, fail := range []bool{false, true} {
+			t.Run(fmt.Sprintf("assigned-%d/failure-%t", assigned, fail), func(t *testing.T) {
+				ctx, cancel := context.WithCancel(context.Background())
+				defer cancel()
+				s := &delayedSession{message: &scaleset.RunnerScaleSetMessage{Statistics: &scaleset.RunnerScaleSetStatistic{TotalAssignedJobs: assigned}, JobCompletedMessages: []*scaleset.JobCompleted{{RunnerName: "completed-fixture"}}}, acquiring: make(chan []int64, 1), release: make(chan struct{}), acknowledged: make(chan struct{}, 1)}
+				for _, id := range []int64{41, 42, 43} {
+					s.message.JobAvailableMessages = append(s.message.JobAvailableMessages, &scaleset.JobAvailable{JobMessageBase: scaleset.JobMessageBase{RunnerRequestID: id}})
+				}
+				if fail {
+					s.acquireErr = errors.New("fixture failure")
+				}
+				stats, done := make(chan DemandStatistics, 1), make(chan error, 1)
+				go func() {
+					done <- pollMessagesStats(ctx, s, 1, func(value DemandStatistics) error { stats <- value; return nil })
+				}()
+				select {
+				case value := <-stats:
+					if value.Assigned != min(1, assigned) || !reflect.DeepEqual(value.CompletedRunners, []string{"completed-fixture"}) {
+						t.Fatal("demand cap or completion metadata changed", value)
+					}
+				case <-time.After(time.Second):
+					t.Fatal("no statistics")
+				}
+				select {
+				case ids := <-s.acquiring:
+					if !reflect.DeepEqual(ids, []int64{41, 42, 43}) {
+						t.Fatal("burst truncated", ids)
+					}
+				case <-time.After(time.Second):
+					t.Fatal("no acquisition")
+				}
+				select {
+				case <-s.acknowledged:
+					t.Fatal("ack before acquisition completed")
+				default:
+				}
+				close(s.release)
+				if fail {
+					select {
+					case err := <-done:
+						if err == nil {
+							t.Fatal("lost acquisition error")
+						}
+					case <-time.After(time.Second):
+						t.Fatal("failure not returned")
+					}
+					select {
+					case <-s.acknowledged:
+						t.Fatal("failed acquisition acknowledged")
+					default:
+					}
+				} else {
+					select {
+					case <-s.acknowledged:
+					case <-time.After(time.Second):
+						t.Fatal("message not acknowledged")
+					}
+					cancel()
+					select {
+					case <-done:
+					case <-time.After(time.Second):
+						t.Fatal("poll did not stop")
+					}
+				}
+			})
+		}
+	}
+}
+
+func TestInvalidAvailableJobIsRejectedBeforeAcquisitionOrAcknowledgement(t *testing.T) {
+	for _, invalid := range []*scaleset.JobAvailable{nil, {}, {JobMessageBase: scaleset.JobMessageBase{RunnerRequestID: -1}}} {
+		for _, assigned := range []int{0, 1, 5} {
+			t.Run(fmt.Sprint(assigned), func(t *testing.T) {
+				s := &delayedSession{message: &scaleset.RunnerScaleSetMessage{Statistics: &scaleset.RunnerScaleSetStatistic{TotalAssignedJobs: assigned}, JobAvailableMessages: []*scaleset.JobAvailable{{JobMessageBase: scaleset.JobMessageBase{RunnerRequestID: 41}}, invalid}}, acquiring: make(chan []int64, 1), release: make(chan struct{}), acknowledged: make(chan struct{}, 1)}
+				err := pollMessagesStats(context.Background(), s, 1, func(DemandStatistics) error { t.Fatal("invalid message emitted demand"); return nil })
+				if err == nil {
+					t.Fatal("invalid availability accepted")
+				}
+				select {
+				case <-s.acquiring:
+					t.Fatal("invalid availability partially acquired")
+				default:
+				}
+				select {
+				case <-s.acknowledged:
+					t.Fatal("invalid availability acknowledged")
+				default:
+				}
+			})
+		}
+	}
+}
+
+func TestOversizedAvailabilityRejectedBeforeSideEffects(t *testing.T) {
+	s := &delayedSession{message: &scaleset.RunnerScaleSetMessage{Statistics: &scaleset.RunnerScaleSetStatistic{TotalAssignedJobs: 1}, JobAvailableMessages: make([]*scaleset.JobAvailable, maxAvailableJobs+1)}, acquiring: make(chan []int64, 1), release: make(chan struct{}), acknowledged: make(chan struct{}, 1)}
+	job := &scaleset.JobAvailable{JobMessageBase: scaleset.JobMessageBase{RunnerRequestID: 1}}
+	for i := range s.message.JobAvailableMessages {
+		s.message.JobAvailableMessages[i] = job
+	}
+	close(s.release)
+	err := pollMessagesStats(context.Background(), s, 1, func(DemandStatistics) error { t.Fatal("oversized batch emitted demand"); return nil })
+	if err == nil || err.Error() != "availability batch too large" {
+		t.Fatal("oversized batch accepted", err)
+	}
+	if len(s.acquiring) != 0 || len(s.acknowledged) != 0 {
+		t.Fatal("oversized batch acquired or acknowledged")
 	}
 }
