@@ -210,24 +210,26 @@ func TestBurstAcquisitionPreservesBacklogAndCompletionMetadata(t *testing.T) {
 	}
 }
 
-func TestNilAvailableJobIsRejectedBeforeAcquisitionOrAcknowledgement(t *testing.T) {
-	for _, assigned := range []int{0, 1, 5} {
-		t.Run(fmt.Sprint(assigned), func(t *testing.T) {
-			s := &delayedSession{message: &scaleset.RunnerScaleSetMessage{Statistics: &scaleset.RunnerScaleSetStatistic{TotalAssignedJobs: assigned}, JobAvailableMessages: []*scaleset.JobAvailable{{JobMessageBase: scaleset.JobMessageBase{RunnerRequestID: 41}}, nil}}, acquiring: make(chan []int64, 1), release: make(chan struct{}), acknowledged: make(chan struct{}, 1)}
-			err := pollMessagesStats(context.Background(), s, 1, func(DemandStatistics) error { t.Fatal("invalid message emitted demand"); return nil })
-			if err == nil {
-				t.Fatal("nil availability accepted")
-			}
-			select {
-			case <-s.acquiring:
-				t.Fatal("invalid availability partially acquired")
-			default:
-			}
-			select {
-			case <-s.acknowledged:
-				t.Fatal("invalid availability acknowledged")
-			default:
-			}
-		})
+func TestInvalidAvailableJobIsRejectedBeforeAcquisitionOrAcknowledgement(t *testing.T) {
+	for _, invalid := range []*scaleset.JobAvailable{nil, {}, {JobMessageBase: scaleset.JobMessageBase{RunnerRequestID: -1}}} {
+		for _, assigned := range []int{0, 1, 5} {
+			t.Run(fmt.Sprint(assigned), func(t *testing.T) {
+				s := &delayedSession{message: &scaleset.RunnerScaleSetMessage{Statistics: &scaleset.RunnerScaleSetStatistic{TotalAssignedJobs: assigned}, JobAvailableMessages: []*scaleset.JobAvailable{{JobMessageBase: scaleset.JobMessageBase{RunnerRequestID: 41}}, invalid}}, acquiring: make(chan []int64, 1), release: make(chan struct{}), acknowledged: make(chan struct{}, 1)}
+				err := pollMessagesStats(context.Background(), s, 1, func(DemandStatistics) error { t.Fatal("invalid message emitted demand"); return nil })
+				if err == nil {
+					t.Fatal("invalid availability accepted")
+				}
+				select {
+				case <-s.acquiring:
+					t.Fatal("invalid availability partially acquired")
+				default:
+				}
+				select {
+				case <-s.acknowledged:
+					t.Fatal("invalid availability acknowledged")
+				default:
+				}
+			})
+		}
 	}
 }
