@@ -235,7 +235,11 @@ def scope_name(entry):
     return ('org-'+str(entry['account']['id']) if entry['account']['type']=='Organization' else 'repo-'+str(entry['repository']['id']))
 
 
-def validate_scope_merge(previous, entry):
+def validate_scope_merge(previous, entry, authenticated=False):
+    # A personal owner may reinstall the App after disconnecting. The new
+    # installation is still checked against GitHub before any scope is applied.
+    if previous is not None and authenticated and entry.get('account',{}).get('type')=='User' and previous.get('account',{}).get('type')=='User' and previous.get('desired_state')=='disconnected' and not previous.get('enabled_queues') and previous['user']['id']==entry['user']['id']==previous['account']['id']==entry['account']['id'] and previous['repository']['id']==entry['repository']['id']:
+        return
     if previous is not None and (previous['user']['id']!=entry['user']['id'] or previous['installation_id']!=entry['installation_id'] or previous['repository']['id']!=entry['repository']['id']):
         raise ValueError('conflicting scope owners or repositories require operator review')
 
@@ -250,12 +254,12 @@ def merge_site_requests(entries, policy, catalog, site_available, original):
         if approved_request(entry,policy,catalog,authenticated=trusted) is None:continue
         name=scope_name(entry);previous=requests_by_scope.get(name)
         try:
-            validate_scope_merge(previous,entry)
+            validate_scope_merge(previous,entry,authenticated=trusted)
         except ValueError:
             # Keep the established scope and let unrelated enrollments progress.
             if entry.get('id'):
                 updates.append({'id':entry['id'],'status':'error','enabled_queues':[],
-                    'message':'This organization already has a different repository or requester configured. Only one repository per organization is supported; contact the operator to replace it.'})
+                    'message':('This organization already has a different repository or requester configured. Only one repository per organization is supported; contact the operator to replace it.' if entry['account']['type']=='Organization' else 'This repository has a conflicting requester or App installation. Disconnect the previous service before reconnecting; contact the operator if it persists.')})
             continue
         merged=dict(entry)
         if previous is not None and not merged.get('workflow_path') and previous['repository']['id']==entry['repository']['id'] and previous.get('workflow_path'):
@@ -263,6 +267,20 @@ def merge_site_requests(entries, policy, catalog, site_available, original):
         requests_by_scope[name]=merged
         if trusted:authenticated_scopes.add(name)
     return list(requests_by_scope.values()),authenticated_scopes,updates
+
+
+def admission_config(config, entry, authenticated=False):
+    """Called only after current GitHub installation/repository checks succeed."""
+    result=copy.deepcopy(config)
+    old=result.get('scopes',{}).get(scope_name(entry))
+    if (authenticated and authenticated_request(entry)
+            and entry['account']['type']=='User'
+            and entry.get('desired_state','active')=='active'
+            and old and old.get('disabled') is True
+            and old.get('app_installation_id')!=entry['installation_id']
+            and old.get('github_url','').lower().rstrip('/')==('https://github.com/'+entry['repository']['full_name']).lower()):
+        result['scopes'].pop(scope_name(entry))
+    return result
 
 
 def workflow_access(entry, policy, authenticated=False):
@@ -514,7 +532,7 @@ def main():
                     updates.append({'id':entry['id'],'status':'pending','enabled_queues':[],'message':str(error)})
                 continue
             with tempfile.TemporaryDirectory(prefix='chickadee-admission-') as tmp:
-                config=pathlib.Path(tmp)/'config.json';config.write_text(json.dumps(candidate));config.chmod(0o600)
+                config=pathlib.Path(tmp)/'config.json';config.write_text(json.dumps(admission_config(candidate,request,authenticated=name in authenticated_scopes)));config.chmod(0o600)
                 req=pathlib.Path(tmp)/'request.json';req.write_text(json.dumps(request));req.chmod(0o600)
                 output=pathlib.Path(tmp)/'output.json'
                 command=['python3',str(pathlib.Path(__file__).with_name('admit-installation.py')),'--config',str(config),'--request',str(req),'--output',str(output),'--trusted-workflows','--workflow',workflow]

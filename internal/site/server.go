@@ -122,6 +122,7 @@ type page struct {
 	Title, Message, CSRF string
 	User                 *User
 	Choices              []Choice
+	ChoicesUnavailable   bool
 	Enrollments          []Enrollment
 	ExtraQueues          []string
 	LoginReady           bool
@@ -408,7 +409,7 @@ func (s *Server) dashboard(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	choices, e := s.choices(r.Context(), v)
-	p := page{Title: "Your repositories", User: &v.User, CSRF: v.CSRF, Choices: choices, ExtraQueues: queueCatalog(s.cfg.MacOSPreview), MacOSPreview: s.cfg.MacOSPreview}
+	p := page{Title: "Your repositories", User: &v.User, CSRF: v.CSRF, Choices: choices, ChoicesUnavailable: e != nil, ExtraQueues: queueCatalog(s.cfg.MacOSPreview), MacOSPreview: s.cfg.MacOSPreview}
 	if e != nil {
 		p.Message = "GitHub access could not be verified. Sign in again, or check your App installation permissions."
 	}
@@ -449,7 +450,11 @@ func (s *Server) dashboard(w http.ResponseWriter, r *http.Request) {
 					entry.Message = "GitHub access could not be verified. This disconnected service remains stored for cleanup; no runner availability is inferred."
 				} else {
 					entry.Status = "permission-required"
-					entry.Message = "Current GitHub administration access could not be verified. Restore access or sign in again to view usage and manage queues."
+					if e != nil {
+						entry.Message = "GitHub verification is unavailable. Retry the lookup or sign in again; the previous service state has not been rechecked."
+					} else {
+						entry.Message = "Current GitHub administration access could not be verified. Restore access or sign in again to view usage and manage queues."
+					}
 				}
 			}
 			p.Enrollments = append(p.Enrollments, entry)
