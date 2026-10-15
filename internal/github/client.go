@@ -221,15 +221,10 @@ func pollMessagesStats(ctx context.Context, session messageSession, max int, emi
 		if m == nil {
 			continue
 		}
-		capacity := max
-		if m.Statistics != nil {
-			capacity = max - m.Statistics.TotalAssignedJobs
-		}
+		// Acquire the entire offered backlog before acknowledging this message.
+		// Local capacity bounds runners, not ownership of queued requests.
 		var ids []int64
 		for _, j := range m.JobAvailableMessages {
-			if len(ids) >= capacity {
-				break
-			}
 			ids = append(ids, j.RunnerRequestID)
 		}
 		if m.Statistics != nil {
