@@ -450,7 +450,11 @@ func (s *Server) dashboard(w http.ResponseWriter, r *http.Request) {
 					entry.Message = "GitHub access could not be verified. This disconnected service remains stored for cleanup; no runner availability is inferred."
 				} else {
 					entry.Status = "permission-required"
-					entry.Message = "Current GitHub administration access could not be verified. Restore access or sign in again to view usage and manage queues."
+					if e != nil {
+						entry.Message = "GitHub verification is unavailable. Retry the lookup or sign in again; the previous service state has not been rechecked."
+					} else {
+						entry.Message = "Current GitHub administration access could not be verified. Restore access or sign in again to view usage and manage queues."
+					}
 				}
 			}
 			p.Enrollments = append(p.Enrollments, entry)

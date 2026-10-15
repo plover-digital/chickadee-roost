@@ -269,6 +269,20 @@ def merge_site_requests(entries, policy, catalog, site_available, original):
     return list(requests_by_scope.values()),authenticated_scopes,updates
 
 
+def admission_config(config, entry, authenticated=False):
+    """Called only after current GitHub installation/repository checks succeed."""
+    result=copy.deepcopy(config)
+    old=result.get('scopes',{}).get(scope_name(entry))
+    if (authenticated and authenticated_request(entry)
+            and entry['account']['type']=='User'
+            and entry.get('desired_state','active')=='active'
+            and old and old.get('disabled') is True
+            and old.get('app_installation_id')!=entry['installation_id']
+            and old.get('github_url','').lower().rstrip('/')==('https://github.com/'+entry['repository']['full_name']).lower()):
+        result['scopes'].pop(scope_name(entry))
+    return result
+
+
 def workflow_access(entry, policy, authenticated=False):
     mode=policy.get('repository_workflow_access',{}).get(str(entry['repository']['id']),'workflow')
     if authenticated and authenticated_request(entry) and policy.get('auto_repository_workflows') is True and entry['account']['type']=='Organization':mode='repository'
@@ -518,7 +532,7 @@ def main():
                     updates.append({'id':entry['id'],'status':'pending','enabled_queues':[],'message':str(error)})
                 continue
             with tempfile.TemporaryDirectory(prefix='chickadee-admission-') as tmp:
-                config=pathlib.Path(tmp)/'config.json';config.write_text(json.dumps(candidate));config.chmod(0o600)
+                config=pathlib.Path(tmp)/'config.json';config.write_text(json.dumps(admission_config(candidate,request,authenticated=name in authenticated_scopes)));config.chmod(0o600)
                 req=pathlib.Path(tmp)/'request.json';req.write_text(json.dumps(request));req.chmod(0o600)
                 output=pathlib.Path(tmp)/'output.json'
                 command=['python3',str(pathlib.Path(__file__).with_name('admit-installation.py')),'--config',str(config),'--request',str(req),'--output',str(output),'--trusted-workflows','--workflow',workflow]

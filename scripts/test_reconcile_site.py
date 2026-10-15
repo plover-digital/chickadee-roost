@@ -302,3 +302,26 @@ class PersonalReinstallation(unittest.TestCase):
   with self.assertRaises(ValueError):m.validate_scope_merge(old,new,authenticated=False)
   other=copy.deepcopy(new);other['user']['id']=8
   with self.assertRaises(ValueError):m.validate_scope_merge(old,other,authenticated=True)
+
+class ReinstallDisabledConfig(unittest.TestCase):
+ def test_verified_personal_reinstall_replaces_only_disabled_old_config(self):
+  import copy
+  old={'id':'old','authenticated':True,'user':{'id':7},'account':{'id':7,'type':'User','login':'owner'},'installation_id':10,'repository':{'id':99,'full_name':'owner/repo'},'desired_state':'disconnected','enabled_queues':[]}
+  new=copy.deepcopy(old);new.update(id='new',installation_id=11,desired_state='active')
+  profile={'image':'ubuntu','resources':'small','max_vms':1,'warm_pool':0}
+  config={'limits':{'max_vms':1},'scopes':{'primary':{'github_url':'https://github.com/operator','app_installation_id':1,'runner_group_id':1,'profiles':{'chickadee':profile}},'repo-99':{'github_url':'https://github.com/owner/repo','app_installation_id':10,'runner_group_id':1,'profiles':{'chickadee':profile},'disabled':True}}}
+  original=copy.deepcopy(config)
+  requests,trusted,_=m.merge_site_requests([old,new],{'auto_approve_authenticated':True},{'chickadee':profile},True,config)
+  prepared=m.admission_config(config,requests[0],authenticated='repo-99' in trusted)
+  install={'id':11,'account':new['account']}
+  result=m.admit.proposed(prepared,requests[0],install,new['repository'],1)
+  self.assertEqual(result['scopes']['repo-99']['app_installation_id'],11)
+  self.assertNotIn('disabled',result['scopes']['repo-99']);self.assertEqual(config,original)
+  self.assertEqual(result['scopes']['primary'],config['scopes']['primary'])
+  self.assertEqual(m.admission_config(config,new,authenticated=False),original)
+  active=copy.deepcopy(config);active['scopes']['repo-99'].pop('disabled')
+  self.assertEqual(m.admission_config(active,new,authenticated=True),active)
+  wrong=copy.deepcopy(config);wrong['scopes']['repo-99']['github_url']='https://github.com/other/repo'
+  self.assertEqual(m.admission_config(wrong,new,authenticated=True),wrong)
+  org=copy.deepcopy(new);org['account']['type']='Organization';org['repository']['permissions']={'admin':True}
+  self.assertEqual(m.admission_config(config,org,authenticated=True),config)

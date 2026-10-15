@@ -43,11 +43,17 @@ func TestDashboardWorkflowContainsOnlyEnabledQueues(t *testing.T) {
 }
 
 func TestDashboardInstallPromptRequiresSuccessfulGitHubLookup(t *testing.T) {
-	for _, stage := range []string{"empty", "installations-error", "repositories-error"} {
+	for _, stage := range []string{"empty", "installations-error", "repositories-error", "existing-service-error"} {
 		t.Run(stage, func(t *testing.T) {
 			s := fixture(t)
 			s.sessions["session"] = session{User: User{7, "tester"}, Token: "fixture", CSRF: "csrf", Expires: time.Now().Add(time.Hour)}
+			if stage == "existing-service-error" {
+				s.enrollments = []Enrollment{{ID: "existing", User: User{7, "tester"}, InstallationID: 8, Account: Account{ID: 7, Type: "User"}, Repository: Repository{ID: 99, Name: "tester/repo"}, Status: "active", DesiredState: "active", EnabledQueues: []string{"chickadee"}}}
+			}
 			s.http.Transport = transport(func(r *http.Request) (*http.Response, error) {
+				if stage == "existing-service-error" {
+					return nil, fmt.Errorf("upstream unavailable")
+				}
 				if stage == "installations-error" || (stage == "repositories-error" && strings.HasPrefix(r.URL.Path, "/user/installations/")) {
 					return nil, fmt.Errorf("upstream unavailable")
 				}
@@ -71,6 +77,9 @@ func TestDashboardInstallPromptRequiresSuccessfulGitHubLookup(t *testing.T) {
 			} else {
 				if strings.Contains(body, `id="finish-setup"`) || strings.Contains(body, `href="/install"`) || strings.Contains(body, `action="/enroll"`) {
 					t.Fatal("lookup failure offered installation or enrollment")
+				}
+				if stage == "existing-service-error" && (!strings.Contains(body, "verification unavailable") || strings.Contains(body, "GitHub permission approval is needed")) {
+					t.Fatal("existing service claimed permission loss on lookup failure")
 				}
 				if !strings.Contains(body, "Repository setup is unavailable") || !strings.Contains(body, "retry the lookup") {
 					t.Fatal("verification failure lost retry guidance")
