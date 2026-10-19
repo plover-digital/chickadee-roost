@@ -52,13 +52,17 @@ has enabled them; see [activation policy](docs/onboarding-site.md#activation-pol
 
 ## Build and test
 
-Use Go 1.26.3 for the reference build and Python 3 for the operator scripts.
+Use Go 1.26.9 for the reference build and Python 3 for the operator scripts.
 The Go web package has no external module dependencies. Python scripts use the
 standard library; operational App signing also requires OpenSSL.
 
 ```sh
 make build test
+make vulncheck
 ```
+
+See [release security checks and rollout](docs/releases.md) for build metadata,
+scanner evidence, compatibility, and rollback.
 
 Equivalent checks are `go test -race ./...` and
 `python3 -m unittest discover -s scripts -p 'test_*.py'`. Tests use synthetic
