@@ -1,11 +1,27 @@
-# Compiler-only broker security release
+# Broker compiler and client security maintenance release
 
-Use this route when an immediate compiler fix must preserve the deployed
-broker's application code, dependency versions, Go compatibility defaults,
-worker identities and journals. It is separate from a release of current main.
-Do not deploy a current-main artifact and label it a compiler-only backport.
-The website is a separate artifact: inspect its actual running version first,
-and preserve any newer website changes.
+This route preserves the byte-reproduced broker application source while updating
+Go to 1.26.9 and the public worker API client to the reviewed core commit
+`83eba5906053ab187839528f6ce05c38b4fc7368` (module version
+`v0.0.0-20261019192139-83eba5906053`). It is **not compiler-only** and does not
+deploy current-main Roost application code. The original source archive and
+module files remain separate from the candidate source archive and module pin.
+Do not replace a newer website with this broker-only artifact.
+
+The client fix preserves context cancellation when response reading succeeds at
+EOF concurrently with cancellation. It executes in Roost; replacing a worker
+server binary alone does not fix the broker client. The API dependency retains
+native `apple-vz`, `q35`, `microvm` and resource summaries. Compared with the
+historical `c0a0cea` client, it also understands optional `work_folder` and the
+`landlock` enum. Existing VM responses omit the optional field; Roost catalog
+validation continues to reject Landlock service profiles. Only `workerapi` is
+imported from core, not its host engine. API v1, identity/certificates and journals
+remain compatible; no worker generation or state migration is required.
+
+Using the reviewed public main API avoids creating a separate maintained core
+fork. Do not substitute the older worker backport lineage: it predates native
+Mac API support. Validate the dependency diff and the pinned package's tests,
+including the deterministic successful-EOF cancellation regression.
 
 ## Prove deployed source before rebuilding
 
@@ -19,9 +35,9 @@ do not describe the candidate as the deployed source.
 The following recipe applies to a Linux/amd64 broker originally built with
 Go 1.26.3, CGO disabled, the default amd64 v1 target, no build tags, and
 `-buildvcs=false -mod=readonly -trimpath`. Adjusting those assumptions requires
-separate evidence/review. The replacement uses Go 1.26.9, preserving `go.mod`
-and `go.sum`, including the module's Go directive. Raising that directive can
-change Go compatibility defaults and is outside this compiler-only route.
+separate evidence/review. The replacement uses Go 1.26.9, updating only the reviewed core requirement and checksums in `go.mod`/`go.sum`,
+while preserving the module's Go directive. Raising that directive can
+change Go compatibility defaults and is outside this maintenance route.
 
 Run from a trusted Roost Git repository. Set `RECIPE_REVISION` to the **full
 40-character reviewed commit** containing the launcher, recipe and helper;
@@ -43,7 +59,7 @@ git show "$RECIPE_REVISION:scripts/run-reviewed-recipe.py" | \
 ```
 
 The launcher rejects symbolic or abbreviated revisions. It reads the launcher,
-[shell recipe](../scripts/compiler-only-release.sh) and release-check helper
+[shell recipe](../scripts/broker-security-release.sh) and release-check helper
 from that immutable commit, retains their exact bytes in `recipe/`, and records
 SHA-256 hashes and Git blob IDs in the release manifest. The shell runs from the
 same in-memory bytes that were hashed; the helper is passed as an immutable
@@ -53,15 +69,17 @@ and concurrent branch movement therefore cannot silently change the attributed
 recipe. `recipe_provenance` identifies the executed objects; it does not claim
 the caller's working tree is clean. The archive retains all three reviewed files.
 
-The recipe reproduces original bytes, rebuilds with the patched compiler,
-runs Go race/Python tests and snapshot-backed source/binary scans, verifies
-unchanged source/module files, then packages the broker and evidence. A failure
+The recipe reproduces original bytes, applies the reviewed API pin and rebuilds with the patched compiler,
+runs Go race/Python and pinned workerapi package tests, checks native/legacy API
+compatibility and the absence of host-engine imports, performs snapshot-backed
+source/binary scans, verifies
+unchanged application source and candidate module files, then packages the broker and evidence. A failure
 stops release creation. As with every release process, the launching interpreter,
 Git executable and operator environment must be trusted; these checks do not
 protect against a malicious operator replacing the launcher command itself.
 
 Retain the original-byte match, source archive, manifest, scanner/database
-versions, tests, scan streams and archive hash. No application version is
+versions, tests, scan streams and archive hash. Original and candidate source/module hashes are distinct. No application version is
 embedded by these historical flags: the manifest and hashes are essential.
 A passing scan does not prove absence of vulnerabilities or deployment success.
 

@@ -10,6 +10,7 @@ build:
 
 test:
 	go test -race -mod=readonly ./...
+	go test -race -mod=readonly github.com/plover-digital/chickadee/workerapi
 	python3 -m unittest discover -s scripts -p 'test_*.py'
 
 # No deployment: artifacts and evidence remain in ignored local directories.

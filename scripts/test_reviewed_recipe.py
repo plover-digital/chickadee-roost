@@ -36,7 +36,7 @@ root = pathlib.Path(os.environ['RELEASE_DIR'])
     'provenance': json.loads(os.environ['RECIPE_PROVENANCE_JSON'])}))
 END
 '''
-            (scripts / 'compiler-only-release.sh').write_bytes(recipe)
+            (scripts / 'broker-security-release.sh').write_bytes(recipe)
             subprocess.run(['git', 'init', '-q', str(root)], check=True)
             def git(*args):
                 return subprocess.check_output(['git', '-C', str(root), *args], text=True).strip()
@@ -47,7 +47,7 @@ END
             revision = git('rev-parse', 'HEAD')
             # These modifications must never become the executable recipe/helper.
             (scripts / 'release-check.py').write_text("raise RuntimeError('dirty gate')\n")
-            (scripts / 'compiler-only-release.sh').write_text('exit 91\n')
+            (scripts / 'broker-security-release.sh').write_text('exit 91\n')
             original_run = subprocess.run
             def move_head_then_run(args, **kwargs):
                 if args == ['bash', '-s']:
@@ -67,7 +67,7 @@ END
             evidence = json.loads((output / 'result.json').read_text())
             self.assertEqual(evidence['result'], 'reviewed gate')
             self.assertEqual(evidence['provenance']['revision'], revision)
-            for name, data in [('release-check.py', helper), ('compiler-only-release.sh', recipe)]:
+            for name, data in [('release-check.py', helper), ('broker-security-release.sh', recipe)]:
                 self.assertEqual((output / 'recipe' / name).read_bytes(), data)
                 self.assertEqual(evidence['provenance']['files']['scripts/' + name]['sha256'],
                                  hashlib.sha256(data).hexdigest())

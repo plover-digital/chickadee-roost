@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Launch compiler-only releases using immutable reviewed Git objects."""
+"""Launch broker security releases using immutable reviewed Git objects."""
 import base64
 import hashlib
 import json
@@ -10,7 +10,7 @@ import subprocess
 import sys
 import tempfile
 
-FILES = ('scripts/run-reviewed-recipe.py', 'scripts/compiler-only-release.sh',
+FILES = ('scripts/run-reviewed-recipe.py', 'scripts/broker-security-release.sh',
          'scripts/release-check.py')
 
 
@@ -36,7 +36,7 @@ def reviewed_inputs(revision):
 def run(revision):
     buffers, provenance = reviewed_inputs(revision)
     Path('build').mkdir(exist_ok=True)
-    root = Path(tempfile.mkdtemp(prefix='broker-compiler.', dir='build')).resolve()
+    root = Path(tempfile.mkdtemp(prefix='broker-security.', dir='build')).resolve()
     (root / 'recipe').mkdir()
     for name, data in buffers.items():
         (root / 'recipe' / Path(name).name).write_bytes(data)
