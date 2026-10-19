@@ -2,6 +2,7 @@ package dispatch
 
 import (
 	"encoding/json"
+	"github.com/plover-digital/chickadee/workerapi"
 	"os"
 	"path/filepath"
 	"strings"
@@ -48,5 +49,26 @@ func TestDisconnectedScopeCreatesNoListener(t *testing.T) {
 	q, _, e := LoadCatalog(p, nil)
 	if e != nil || len(q) != 0 {
 		t.Fatalf("disconnected scope admitted: %v %v", q, e)
+	}
+}
+
+// The public API can add self-hosted backends without enabling hosted placement.
+func TestClientUpgradePreservesNativeAndVMOnlyCatalog(t *testing.T) {
+	for _, machine := range []string{"q35", "microvm", "apple-vz", "landlock"} {
+		t.Run(machine, func(t *testing.T) {
+			p := fixture(t, func(c map[string]any) {
+				c["images"].(map[string]any)["u26"].(map[string]any)["machine"] = machine
+			})
+			queues, _, err := LoadCatalog(p, map[string]string{"u26": strings.Repeat("a", 64)})
+			if machine == "landlock" {
+				if err == nil {
+					t.Fatal("hosted catalog accepted self-hosted backend")
+				}
+				return
+			}
+			if err != nil || len(queues) != 1 || queues[0].Machine != machine || !workerapi.SupportedMachine(machine) {
+				t.Fatalf("VM/native capability lost: %v", err)
+			}
+		})
 	}
 }
