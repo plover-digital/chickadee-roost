@@ -156,6 +156,16 @@ func TestPageHeadersAndInstallTarget(t *testing.T) {
 	if rec.Code != 200 || !strings.Contains(rec.Body.String(), "Sign in with GitHub") || !strings.Contains(rec.Header().Get("Content-Security-Policy"), "frame-ancestors 'none'") {
 		t.Fatal("page/headers missing")
 	}
+	for _, directive := range []string{
+		"script-src 'self' https://analytics.plover.digital;",
+		"connect-src 'self' https://analytics.plover.digital;",
+		"default-src 'self';",
+		"form-action 'self'",
+	} {
+		if !strings.Contains(rec.Header().Get("Content-Security-Policy"), directive) {
+			t.Fatalf("missing CSP directive %q", directive)
+		}
+	}
 	rec = httptest.NewRecorder()
 	s.ServeHTTP(rec, httptest.NewRequest("GET", "/install", nil))
 	if rec.Header().Get("Location") != "https://github.com/apps/chickadee-run/installations/new" {
