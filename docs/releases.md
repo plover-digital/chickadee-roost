@@ -58,6 +58,10 @@ using `GOMAXPROCS=1 GOFLAGS=-p=1`, lower process priority, and set `GOCACHE` and
 `TMPDIR` to dedicated ignored directories. Tests use synthetic data and temporary
 state. Do not launch a second broker with live configuration to smoke-test it.
 
+For a compiler-only rebuild of byte-verified deployed broker source, use the
+[separate backport recipe](compiler-only-release.md). It preserves the old module
+Go directive and does not replace a newer website.
+
 ## Compatibility and coordinated deployment
 
 This security-baseline change preserves public worker API v1, the pinned
