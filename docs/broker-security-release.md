@@ -1,7 +1,7 @@
 # Broker compiler and client security maintenance release
 
 This route preserves the byte-reproduced broker application source while updating
-Go to 1.26.9 and the public worker API client to the reviewed core commit
+Go to 1.26.10 and the public worker API client to the reviewed core commit
 `83eba5906053ab187839528f6ce05c38b4fc7368` (module version
 `v0.0.0-20261019192139-83eba5906053`). It is **not compiler-only** and does not
 deploy current-main Roost application code. The original source archive and
@@ -35,7 +35,7 @@ do not describe the candidate as the deployed source.
 The following recipe applies to a Linux/amd64 broker originally built with
 Go 1.26.3, CGO disabled, the default amd64 v1 target, no build tags, and
 `-buildvcs=false -mod=readonly -trimpath`. Adjusting those assumptions requires
-separate evidence/review. The replacement uses Go 1.26.9, updating only the reviewed core requirement and checksums in `go.mod`/`go.sum`,
+separate evidence/review. The replacement uses Go 1.26.10, updating only the reviewed core requirement and checksums in `go.mod`/`go.sum`,
 while preserving the module's Go directive. Raising that directive can
 change Go compatibility defaults and is outside this maintenance route.
 

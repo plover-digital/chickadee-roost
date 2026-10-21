@@ -18,7 +18,7 @@ export GOTOOLCHAIN=go1.26.3
 CGO_ENABLED=0 go build -C "$release_dir/source" -buildvcs=false -mod=readonly \
   -trimpath -o "$release_dir/broker-original" ./cmd/chickadee-roost
 printf '%s  %s\n' "$BROKER_ORIGINAL_SHA256" "$release_dir/broker-original" | sha256sum -c -
-export GOTOOLCHAIN=go1.26.9
+export GOTOOLCHAIN=go1.26.10
 # Retain the byte-reproduced source anchor; apply only the reviewed API pin.
 cp "$release_dir/source/go.mod" "$release_dir/original.go.mod"
 cp "$release_dir/source/go.sum" "$release_dir/original.go.sum"
