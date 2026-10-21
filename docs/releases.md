@@ -1,12 +1,12 @@
 # Release security checks and rollout
 
-The reference toolchain and minimum module version are Go 1.26.9. The Makefile
-pins `GOTOOLCHAIN=go1.26.9`; CI installs that exact release. Update these together
+The reference toolchain and minimum module version are Go 1.26.10. The Makefile
+pins `GOTOOLCHAIN=go1.26.10`; CI installs that exact release. Update these together
 with `go.mod`, the metadata validator and README when reviewing a newer baseline.
 The pinned scanner is `golang.org/x/vuln/cmd/govulncheck@v1.9.0`.
 
-On 2026-10-19, the [official release history](https://go.dev/doc/devel/release)
-listed 1.26.9 and 1.27.2 as patched supported releases.
+On 2026-10-21, the [official release history](https://go.dev/doc/devel/release)
+listed 1.26.10 and 1.27.3 as patched supported releases.
 [GO-2026-6617](https://pkg.go.dev/vuln/GO-2026-6617) includes the HTTP/2 server
 HPACK race fix in those releases. Keeping the 1.26 line limits upgrade scope.
 Always recheck release notes and the vulnerability database before deployment.
@@ -102,3 +102,13 @@ compatible binary/config; retain the current journal and reconcile inventory on
 restart. Never restore a stale journal snapshot over active assignments. Restore
 the website binary independently and recheck login/status. An old vulnerable
 binary is emergency rollback only; record the exposure and fix forward promptly.
+
+Go 1.26.10 and 1.27.3 fix [GO-2026-6809](https://pkg.go.dev/vuln/GO-2026-6809),
+blocking distrusted CA public keys even when the configured root pool still
+trusts them. Rebuild both the broker and website. Existing deployments using a
+historical accepted application must rebuild that exact source and dependency
+graph; current-main release artifacts are not a substitute for that provenance.
+The historical broker recipe retains its original Go 1.26.3 reproduction step
+and now compiles its candidate with Go 1.26.10. No protocol, configuration, journal
+format or deployment ordering changes are introduced. Deployments remain an
+operator-controlled action after concrete build and vulnerability evidence.

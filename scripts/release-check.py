@@ -36,7 +36,7 @@ def metadata():
         binary = Path("bin") / name
         info = output("go", "version", "-m", str(binary))
         # Reject stale or foreign binaries; make release builds these first.
-        for expected in ("go1.26.9", "vcs.revision=" + revision,
+        for expected in ("go1.26.10", "vcs.revision=" + revision,
                          "vcs.modified=" + str(dirty).lower(), "CGO_ENABLED=0",
                          "-trimpath=true"):
             if expected not in info:

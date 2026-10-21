@@ -1,5 +1,5 @@
 # Keep CI and release builds on the reviewed security baseline.
-export GOTOOLCHAIN := go1.26.9
+export GOTOOLCHAIN := go1.26.10
 GOVULNCHECK_VERSION := v1.9.0
 
 .PHONY: build test release vulncheck

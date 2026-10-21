@@ -47,7 +47,7 @@ class ReleaseCheckTest(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory, \
                 patch.object(release, 'EVIDENCE', Path(directory)), \
                 patch.object(release, 'output', side_effect=[
-                    'new-revision', '', 'go1.26.9 vcs.revision=old-revision']):
+                    'new-revision', '', 'go1.26.10 vcs.revision=old-revision']):
             with self.assertRaisesRegex(ValueError, 'vcs.revision=new-revision'):
                 release.metadata()
 
