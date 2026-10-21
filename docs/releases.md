@@ -112,3 +112,9 @@ The historical broker recipe retains its original Go 1.26.3 reproduction step
 and now compiles its candidate with Go 1.26.10. No protocol, configuration, journal
 format or deployment ordering changes are introduced. Deployments remain an
 operator-controlled action after concrete build and vulnerability evidence.
+
+Make entrypoints use an override export for exact Go 1.26.10, including when
+`GOTOOLCHAIN=auto` is inherited or passed on the make command line. The module
+minimum/suggested version alone does not reject a newer vulnerable Go 1.27.2.
+Direct Go callers must explicitly select a patched compiler. The historical
+candidate recipe already selects its exact compiler independently.
