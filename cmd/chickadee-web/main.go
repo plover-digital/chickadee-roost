@@ -28,6 +28,20 @@ func main() {
 		}
 	}
 	c := site.Config{AdminUserID: adminID, PublicURL: env("CHICKADEE_PUBLIC_URL", "http://127.0.0.1:8080"), AppSlug: env("CHICKADEE_APP_SLUG", "chickadee-run"), ClientID: os.Getenv("CHICKADEE_APP_CLIENT_ID"), AppID: id, AutomaticActivation: os.Getenv("CHICKADEE_AUTOMATIC_ACTIVATION") == "1", MacOSPreview: os.Getenv("CHICKADEE_MACOS_PREVIEW") == "1", StateDir: env("CHICKADEE_WEB_STATE", "/var/lib/chickadee-web")}
+	if path := os.Getenv("CHICKADEE_AGENT_KEY_FILE"); path != "" {
+		info, err := os.Lstat(path)
+		if err != nil || !info.Mode().IsRegular() || info.Mode().Perm()&0077 != 0 || info.Size() != 32 {
+			slog.Error("agent key file must be private, regular and exactly 32 bytes")
+			os.Exit(1)
+		}
+		key, err := os.ReadFile(path)
+		if err != nil || len(key) != 32 {
+			slog.Error("agent key unavailable")
+			os.Exit(1)
+		}
+		c.AgentTokenKey = key
+	}
+
 	if path := os.Getenv("CHICKADEE_OAUTH_SECRET_FILE"); path != "" {
 		info, e := os.Lstat(path)
 		if e != nil || !info.Mode().IsRegular() || info.Mode().Perm()&0077 != 0 {

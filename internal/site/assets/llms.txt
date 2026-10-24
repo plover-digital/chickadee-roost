@@ -1,0 +1,22 @@
+# Chickadee
+
+> Disposable GitHub Actions runners with GitHub sign-in and scoped service API tokens.
+
+Humans sign in with GitHub, install the App, select repositories and create a
+named token at /settings/tokens. Agents use CHICKADEE_TOKEN as a Bearer token on
+/api/v1/. Tokens are read-only by default, repository-scoped, revocable, and expire
+after a chosen 1–90 days. Never send credentials to another origin or print them.
+GitHub schedules jobs; this API manages service requests and queue configuration.
+Requested state and applied runner availability are different. Use enabled labels.
+
+## Agent documentation
+
+- [Agent API guide](/agents.md): Authentication, human onboarding, complete endpoint examples, bounded polling, errors and safe workflow setup.
+- [OpenAPI description](/openapi.json): Machine-readable service API v1 schema.
+- [Human setup guide](/agents): Browser onboarding and token setup.
+- [Create or revoke tokens](/settings/tokens): Requires human GitHub sign-in; token values are shown once.
+
+## Optional
+
+- [Roost source and issues](https://github.com/plover-digital/chickadee-roost): Public implementation and portable deployment documentation.
+- [Standalone Chickadee](https://github.com/plover-digital/chickadee): Self-hostable runner engine, usable without a hosted-service account.

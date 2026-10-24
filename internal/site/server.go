@@ -34,6 +34,7 @@ type Config struct {
 	PublicURL, AppSlug, ClientID, ClientSecret, StateDir string
 	AppID                                                int64
 	AdminUserID                                          int64
+	AgentTokenKey                                        []byte
 	AutomaticActivation                                  bool
 	MacOSPreview                                         bool
 }
@@ -101,9 +102,13 @@ type oauthState struct {
 	Expires          time.Time
 }
 type session struct {
-	User        User
-	Token, CSRF string
-	Expires     time.Time
+	User              User
+	Token, CSRF       string
+	Expires           time.Time
+	RefreshToken      string
+	GitHubExpires     time.Time
+	RefreshExpires    time.Time
+	AgentRepositories map[int64]bool
 }
 type Server struct {
 	cfg          Config
@@ -114,11 +119,20 @@ type Server struct {
 	mu           sync.Mutex
 	states       map[string]oauthState
 	sessions     map[string]session
+	agentVault   *agentVault
 	enrollments  []Enrollment
 	telemetry    []FleetSample
 	accountUsage []AccountUsage
 }
 type page struct {
+	PublicURL            string
+	AgentGuide           bool
+	AgentAccess          bool
+	AgentTokens          []agentToken
+	NewAgentToken        string
+	AgentExpires         time.Time
+	AgentReady           bool
+	AgentNotice          string
 	Title, Message, CSRF string
 	User                 *User
 	Choices              []Choice
@@ -182,6 +196,16 @@ func New(c Config) (*Server, error) {
 	}
 	s.mux.HandleFunc("GET /dashboard/admin", s.adminDashboard)
 	s.mux.HandleFunc("GET /dashboard", s.dashboard)
+	if len(c.AgentTokenKey) != 0 {
+		if !s.ready() {
+			return nil, errors.New("agent access requires configured GitHub OAuth")
+		}
+		s.agentVault, e = newAgentVault(c.AgentTokenKey, c.StateDir)
+		if e != nil {
+			return nil, e
+		}
+	}
+	s.agentRoutes()
 	s.mux.HandleFunc("POST /enroll", s.enroll)
 	s.mux.HandleFunc("POST /logout", s.logout)
 	s.mux.HandleFunc("POST /manage", s.manage)
@@ -198,6 +222,7 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("X-Content-Type-Options", "nosniff")
 	w.Header().Set("Referrer-Policy", "same-origin")
 	w.Header().Set("Cache-Control", "no-store")
+	w.Header().Set("Link", `</llms.txt>; rel="describedby"`)
 	s.mux.ServeHTTP(w, r)
 }
 func random() string {
@@ -242,6 +267,7 @@ func (s *Server) current(r *http.Request) (string, session, bool) {
 	return c.Value, v, ok
 }
 func (s *Server) render(w http.ResponseWriter, p page) {
+	p.PublicURL = s.cfg.PublicURL
 	p.IsAdmin = p.User != nil && s.cfg.AdminUserID > 0 && p.User.ID == s.cfg.AdminUserID
 	p.LoginReady = s.ready()
 	p.AutomaticActivation = s.cfg.AutomaticActivation
@@ -330,8 +356,11 @@ func (s *Server) callback(w http.ResponseWriter, r *http.Request) {
 	}
 	defer res.Body.Close()
 	var result struct {
-		Token string `json:"access_token"`
-		Error string `json:"error"`
+		Token            string `json:"access_token"`
+		RefreshToken     string `json:"refresh_token"`
+		ExpiresIn        int64  `json:"expires_in"`
+		RefreshExpiresIn int64  `json:"refresh_token_expires_in"`
+		Error            string `json:"error"`
 	}
 	b, e := io.ReadAll(io.LimitReader(res.Body, 65537))
 	if e != nil || res.StatusCode != 200 || len(b) > 65536 || json.Unmarshal(b, &result) != nil || result.Token == "" || result.Error != "" {
@@ -351,7 +380,13 @@ func (s *Server) callback(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "Try again shortly", 503)
 		return
 	}
-	s.sessions[sid] = session{user, result.Token, random(), time.Now().Add(time.Hour)}
+	v := session{User: user, Token: result.Token, CSRF: random(), Expires: time.Now().Add(time.Hour)}
+	if s.agentVault != nil && result.RefreshToken != "" && result.ExpiresIn > 0 && result.ExpiresIn <= 86400 && result.RefreshExpiresIn > 0 && result.RefreshExpiresIn <= 366*86400 {
+		v.RefreshToken = result.RefreshToken
+		v.GitHubExpires = time.Now().Add(time.Duration(result.ExpiresIn) * time.Second)
+		v.RefreshExpires = time.Now().Add(time.Duration(result.RefreshExpiresIn) * time.Second)
+	}
+	s.sessions[sid] = v
 	s.mu.Unlock()
 	s.cookie(w, "chickadee-session", sid, 3600)
 	http.Redirect(w, r, "/dashboard", http.StatusSeeOther)
@@ -395,7 +430,7 @@ func (s *Server) choices(ctx context.Context, v session) ([]Choice, error) {
 			return nil, errors.New("repository list exceeds beta limit")
 		}
 		for _, repo := range repos.Repositories {
-			if repo.ID > 0 && repo.Permissions["admin"] {
+			if repo.ID > 0 && repo.Permissions["admin"] && (v.AgentRepositories == nil || v.AgentRepositories[repo.ID]) {
 				out = append(out, Choice{Installation: i, Repository: repo})
 			}
 		}
@@ -472,7 +507,11 @@ func (s *Server) postSession(w http.ResponseWriter, r *http.Request) (string, se
 		http.Error(w, "Sign in again", 401)
 		return "", v, false
 	}
-	r.Body = http.MaxBytesReader(w, r.Body, 4096)
+	limit := int64(4096)
+	if r.URL.Path == "/settings/tokens" {
+		limit = 16384
+	} // bounded selection of up to 500 repository IDs
+	r.Body = http.MaxBytesReader(w, r.Body, limit)
 	if r.ParseForm() != nil || subtle.ConstantTimeCompare([]byte(r.FormValue("csrf")), []byte(v.CSRF)) != 1 || r.Header.Get("Origin") != s.cfg.PublicURL {
 		http.Error(w, "Invalid request", 403)
 		return "", v, false
@@ -542,20 +581,24 @@ func (s *Server) enroll(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
+	s.enrollRequest(w, r, v)
+}
+
+func (s *Server) enrollRequest(w http.ResponseWriter, r *http.Request, v session) {
 	queues, err := requestedQueuesFor(r.PostForm["queue"], s.cfg.MacOSPreview)
 	if err != nil {
-		http.Error(w, "Invalid queue selection", 400)
+		operationError(w, r, "Invalid queue selection", 400)
 		return
 	}
 	iid, e1 := strconv.ParseInt(r.FormValue("installation_id"), 10, 64)
 	rid, e2 := strconv.ParseInt(r.FormValue("repository_id"), 10, 64)
 	if e1 != nil || e2 != nil || iid <= 0 || rid <= 0 {
-		http.Error(w, "Invalid repository selection", 400)
+		operationError(w, r, "Invalid repository selection", 400)
 		return
 	}
 	choices, e := s.choices(r.Context(), v)
 	if e != nil {
-		http.Error(w, "GitHub access could not be verified", 502)
+		operationError(w, r, "GitHub access could not be verified", 502)
 		return
 	}
 	var choice *Choice
@@ -567,14 +610,14 @@ func (s *Server) enroll(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	if choice == nil {
-		http.Error(w, "Repository not authorized", 403)
+		operationError(w, r, "Repository not authorized", 403)
 		return
 	}
 	s.mu.Lock()
 	constraint := organizationConstraint(s.enrollments, v.User, *choice)
 	s.mu.Unlock()
 	if constraint != "" {
-		http.Error(w, constraint, http.StatusConflict)
+		operationError(w, r, constraint, http.StatusConflict)
 		return
 	}
 	workflowPath := strings.TrimSpace(r.FormValue("workflow_path"))
@@ -588,18 +631,18 @@ func (s *Server) enroll(w http.ResponseWriter, r *http.Request) {
 	}
 	s.mu.Unlock()
 	if choice.Installation.Account.Type == "Organization" && !repositoryAccess && !s.cfg.AutomaticActivation && !validWorkflowPath(workflowPath) || workflowPath != "" && !validWorkflowPath(workflowPath) {
-		http.Error(w, "Enter an exact main-branch workflow path, such as .github/workflows/build.yml.", 400)
+		operationError(w, r, "Enter an exact main-branch workflow path, such as .github/workflows/build.yml.", 400)
 		return
 	}
 	permissions := choice.Installation.Permissions
 	if choice.Installation.Account.Type == "User" && permissions["administration"] != "write" || choice.Installation.Account.Type == "Organization" && permissions["organization_self_hosted_runners"] != "write" {
-		http.Error(w, "App runner-management permission needs approval", 403)
+		operationError(w, r, "App runner-management permission needs approval", 403)
 		return
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if constraint := organizationConstraint(s.enrollments, v.User, *choice); constraint != "" {
-		http.Error(w, constraint, http.StatusConflict)
+		operationError(w, r, constraint, http.StatusConflict)
 		return
 	}
 	for i, entry := range s.enrollments {
@@ -613,16 +656,16 @@ func (s *Server) enroll(w http.ResponseWriter, r *http.Request) {
 				entries[i].Status = "approved"
 			}
 			if e = s.saveLocked(entries); e != nil {
-				http.Error(w, "Request could not be saved", 500)
+				operationError(w, r, "Request could not be saved", 500)
 				return
 			}
 			s.enrollments = entries
-			http.Redirect(w, r, "/dashboard", 303)
+			operationAccepted(w, r)
 			return
 		}
 	}
 	if len(s.enrollments) >= 500 {
-		http.Error(w, "Beta capacity reached", 503)
+		operationError(w, r, "Beta capacity reached", 503)
 		return
 	}
 	scope := "repository"
@@ -635,11 +678,11 @@ func (s *Server) enroll(w http.ResponseWriter, r *http.Request) {
 	}
 	entries := append(append([]Enrollment(nil), s.enrollments...), Enrollment{ID: random(), User: v.User, Authenticated: true, InstallationID: iid, Account: choice.Installation.Account, Repository: choice.Repository, Scope: scope, Status: initialStatus, Queues: queues, WorkflowPath: workflowPath, DesiredState: "active", Created: time.Now().UTC()})
 	if e = s.saveLocked(entries); e != nil {
-		http.Error(w, "Request could not be saved", 500)
+		operationError(w, r, "Request could not be saved", 500)
 		return
 	}
 	s.enrollments = entries
-	http.Redirect(w, r, "/dashboard", 303)
+	operationAccepted(w, r)
 }
 func (s *Server) saveLocked(entries []Enrollment) error {
 	b, e := json.MarshalIndent(entries, "", "  ")
