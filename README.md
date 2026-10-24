@@ -27,7 +27,9 @@ portable software; deployment credentials and customer records stay outside Git.
 
 The web server uses Go's standard library and embeds its HTML/CSS/JavaScript.
 GitHub App OAuth uses browser-bound state and S256 PKCE. The OAuth client secret
-stays on the web host; user access tokens remain in expiring memory sessions.
+stays on the web host; browser user access tokens remain in expiring memory
+sessions. Explicitly enabled agent delegation adds an encrypted credential store;
+see [agent access](docs/agent-api.md).
 The website does not need the runner controller's App private key.
 
 A private Unix-socket admin interface receives approved metadata and applied
@@ -49,6 +51,14 @@ backend admission policy. It changes the signup experience, not GitHub permissio
 or applied runner availability. Without that flag, the portable default remains
 manual approval. Enabling these paths in source is not evidence that a deployment
 has enabled them; see [activation policy](docs/onboarding-site.md#activation-policy).
+
+## Agent access
+
+Keep GitHub sign-in, then create a named, repository-scoped token at
+`/settings/tokens`. Read-only is the default; management access is explicit.
+Tokens expire after 1–90 days and can be revoked. Point terminal agents to
+`/llms.txt` for the API v1 guide and OpenAPI schema. Operators must explicitly
+enable encrypted credential storage. See [agent access](docs/agent-api.md).
 
 ## Build and test
 
