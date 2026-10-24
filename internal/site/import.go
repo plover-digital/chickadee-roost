@@ -24,6 +24,10 @@ func (s *Server) importEnrollment(w http.ResponseWriter, r *http.Request) {
 	}
 	// Operator imports are not evidence of a browser-authenticated enrollment.
 	entry.Authenticated = false
+	if !validOrganizationAccess(entry.OrganizationAccess) || !validOrganizationAccess(entry.AppliedOrganizationAccess) || entry.Account.Type != "Organization" && (entry.OrganizationAccess != nil || entry.AppliedOrganizationAccess != nil) {
+		http.Error(w, "Invalid organization access", 400)
+		return
+	}
 	if entry.Account.Type == "User" {
 		if entry.Account.ID != entry.User.ID {
 			http.Error(w, "Personal installation must belong to user", 400)

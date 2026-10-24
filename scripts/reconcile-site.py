@@ -88,17 +88,21 @@ def account_usage_scope(scope, records, jwt, api, now):
         if type(group_id) is not int or group_id<=0:raise ValueError('invalid group identity')
         base='/orgs/'+owner+'/actions/runner-groups/'+str(group_id)
         group=api(base,token=token)
-        if group.get('id')!=group_id or group.get('visibility')!='selected':raise ValueError('usage requires selected group visibility')
-        listing=api(base+'/repositories?per_page=100',token=token)
-        selected=listing['repositories']
-        if type(listing.get('total_count')) is not int or listing['total_count']!=len(selected):raise ValueError('selected ACL incomplete')
+        if group.get('id')!=group_id or group.get('visibility') not in ('selected','all'):raise ValueError('unknown usage group visibility')
+        if group['visibility']=='all':
+            if installation.get('repository_selection')!='all':raise ValueError('all-repository group exceeds installation access')
+            selected=list(accessible.values())
+        else:
+            listing=api(base+'/repositories?per_page=100',token=token)
+            selected=listing['repositories']
+            if type(listing.get('total_count')) is not int or listing['total_count']!=len(selected):raise ValueError('selected ACL incomplete')
     if not isinstance(selected,list) or not 1<=len(selected)<=100:raise ValueError('invalid selected ACL size')
     ids=[]
     for item in selected:
         rid=item['id']
         if type(rid) is not int or rid<=0 or rid in ids or rid not in accessible or item.get('owner',{}).get('id')!=aid or accessible[rid].get('owner',{}).get('id')!=aid:raise ValueError('selected ACL outside installation or account')
         ids.append(rid)
-    return {'installation_id':iid,'account_id':aid,'account_type':kind,'repository_ids':sorted(ids),'observed_at':now.isoformat(),'usage':usage_days(records,scope['github_url'],now)}
+    return {**({'repository_selection':'all'} if not repo and group['visibility']=='all' else {}),'installation_id':iid,'account_id':aid,'account_type':kind,'repository_ids':sorted(ids),'observed_at':now.isoformat(),'usage':usage_days(records,scope['github_url'],now)}
 
 
 def read_runner_status(runtime):
@@ -202,7 +206,7 @@ def authenticated_request(entry):
         if type(value)!=int or value<=0:return False
     account=entry['account'];repo=entry['repository']
     if account.get('type')=='User':return account['id']==entry['user']['id']
-    if account.get('type')=='Organization':return (repo.get('permissions') or {}).get('admin') is True
+    if account.get('type')=='Organization':return entry.get('organization_access') is not None or (repo.get('permissions') or {}).get('admin') is True
     return False
 
 
@@ -236,6 +240,8 @@ def scope_name(entry):
 
 
 def validate_scope_merge(previous, entry, authenticated=False):
+    if previous is not None and authenticated and entry.get('organization_access') is not None and previous.get('account',{}).get('type')==entry.get('account',{}).get('type')=='Organization' and previous['account']['id']==entry['account']['id'] and previous['installation_id']==entry['installation_id']:
+        return
     # A personal owner may reinstall the App after disconnecting. The new
     # installation is still checked against GitHub before any scope is applied.
     if previous is not None and authenticated and entry.get('account',{}).get('type')=='User' and previous.get('account',{}).get('type')=='User' and previous.get('desired_state')=='disconnected' and not previous.get('enabled_queues') and previous['user']['id']==entry['user']['id']==previous['account']['id']==entry['account']['id'] and previous['repository']['id']==entry['repository']['id']:
@@ -473,7 +479,7 @@ def main():
         raise LiveReloadUncertain('admission stopped until operator verifies runtime')
     updates=[];quarantine=set()
     # Managed scope seeds allow revocation checks before a user has signed in.
-    catalog=original.get('profiles') or original.get('scopes',{}).get('primary',{}).get('profiles',{})
+    catalog=policy.get('profile_catalog') or original.get('profiles') or original.get('scopes',{}).get('primary',{}).get('profiles',{})
     requests,authenticated_scopes,merge_updates=merge_site_requests(entries,policy,catalog,site_available,original)
     updates.extend(merge_updates)
     jwt=admit.setup.app_jwt(original['app_client_id'],pathlib.Path(original['app_key_file']))
@@ -482,11 +488,24 @@ def main():
         request=approved_request(entry,policy,catalog,authenticated=scope_name(entry) in authenticated_scopes)
         if request is None:continue
         name=scope_name(entry)
-        # Never let an enrollment mutate the operator's primary scope.
+        # Legacy enrollments remain read-only for the primary scope. Explicit
+        # organization policy requires fresh owner verification and a separate catalog.
         url='https://github.com/'+(entry['account']['login'] if entry['account']['type']=='Organization' else entry['repository']['full_name'])
         primary=candidate.get('scopes',{}).get('primary',{}).get('github_url',candidate.get('github_url',''))
+        if url.lower().rstrip('/')==primary.lower().rstrip('/') and entry.get('organization_access') is None:
+            profiles=(candidate.get('scopes',{}).get('primary') or candidate).get('profiles',{})
+            enabled=[q for q in (entry.get('queues') or ['chickadee']) if q in profiles]
+            if entry.get('id'):updates.append({'id':entry['id'],'status':'active','enabled_queues':enabled,'message':'Operator-managed access is unchanged. An organization owner can update repository access and queues in setup.'})
+            continue
         if url.lower().rstrip('/')==primary.lower().rstrip('/'):
-            if entry.get('id'):updates.append({'id':entry['id'],'status':'active','enabled_queues':['chickadee'],'message':'Operator-owned scope is active; additional queues require explicit approval.'})
+            name='primary'
+            if not policy.get('profile_catalog'):
+                if entry.get('id'):updates.append({'id':entry['id'],'status':'pending','enabled_queues':entry.get('enabled_queues',[]),'message':'The operator must configure the independent profile catalog before this organization can manage its queues.'})
+                continue
+            if not candidate.get('scopes'):raise ValueError('migrate flat operator config before organization management')
+        existing=candidate.get('scopes',{}).get(name)
+        if entry.get('organization_access') is not None and existing and existing.get('app_installation_id')!=entry['installation_id']:
+            if entry.get('id'):updates.append({'id':entry['id'],'status':'permission-required','enabled_queues':[],'message':'The configured organization installation has changed; operator reconciliation is required.'})
             continue
         if name in verified:raise ValueError('multiple requests target one scope; operator reconciliation required')
         verified[name]=True
@@ -500,16 +519,22 @@ def main():
             required='organization_self_hosted_runners' if entry['account']['type']=='Organization' else 'administration'
             revoked=bool(installation.get('suspended_at')) or installation['permissions'].get(required)!='write'
             if not revoked:
-                token=admit.setup.api('/app/installations/'+str(entry['installation_id'])+'/access_tokens','POST',jwt,{'permissions':{required:'write','metadata':'read'}})['token']
+                permissions={required:'write','metadata':'read'}
+                if entry.get('organization_access') is not None:
+                    if installation['permissions'].get('members')!='read':
+                        if entry.get('id'):updates.append({'id':entry['id'],'status':'permission-required','enabled_queues':[],'message':'Approve the App Members read permission to verify organization owner access.'})
+                        continue
+                    permissions['members']='read'
+                token=admit.setup.api('/app/installations/'+str(entry['installation_id'])+'/access_tokens','POST',jwt,{'permissions':permissions})['token']
                 found=False
                 for page in range(1,11):
                     listing=admit.setup.api('/installation/repositories?per_page=100&page='+str(page),token=token)
                     found=any(r['id']==entry['repository']['id'] and r['full_name']==entry['repository']['full_name'] for r in listing['repositories'])
                     if found or len(listing['repositories'])<100:break
                 if not found and len(listing['repositories'])==100:raise RuntimeError('repository verification exceeded page limit')
-                revoked=not found
-                if not revoked and name in authenticated_scopes and entry['account']['type']=='Organization':
-                    admin_missing=not admit.current_repository_admin(entry,token)
+                revoked=not found and entry.get('organization_access') is None
+                if not revoked and (scope_name(entry) in authenticated_scopes or entry.get('organization_access') is not None) and entry['account']['type']=='Organization':
+                    admin_missing=not (admit.current_organization_owner(entry,token) if entry.get('organization_access') is not None else admit.current_repository_admin(entry,token))
                     revoked=admin_missing
         except RuntimeError as err:
             # A 404 from App-authenticated installation lookup confirms removal.
@@ -524,19 +549,22 @@ def main():
             message=('The signup user must currently have admin access to the selected repository; restore access and retry.' if admin_missing else 'GitHub access removed, suspended, or awaiting permission approval.') if revoked else 'New assignments stopped; running jobs finished before applying this state.'
         else:
             try:
-                mode=workflow_access(request,policy,authenticated=name in authenticated_scopes)
-                workflow='.github/workflows/chickadee.yml' if mode=='repository' else workflow_for_request(request,policy,original)
+                mode='organization' if entry.get('organization_access') is not None else workflow_access(request,policy,authenticated=scope_name(entry) in authenticated_scopes)
+                workflow='.github/workflows/chickadee.yml' if mode in ('repository','organization') else workflow_for_request(request,policy,original)
             except WorkflowPathRequired as error:
                 # One incomplete org setup must not block all other beta users.
                 if entry.get('id'):
                     updates.append({'id':entry['id'],'status':'pending','enabled_queues':[],'message':str(error)})
                 continue
             with tempfile.TemporaryDirectory(prefix='chickadee-admission-') as tmp:
-                config=pathlib.Path(tmp)/'config.json';config.write_text(json.dumps(admission_config(candidate,request,authenticated=name in authenticated_scopes)));config.chmod(0o600)
+                config=pathlib.Path(tmp)/'config.json';config.write_text(json.dumps(admission_config(candidate,request,authenticated=scope_name(entry) in authenticated_scopes)));config.chmod(0o600)
                 req=pathlib.Path(tmp)/'request.json';req.write_text(json.dumps(request));req.chmod(0o600)
                 output=pathlib.Path(tmp)/'output.json'
                 command=['python3',str(pathlib.Path(__file__).with_name('admit-installation.py')),'--config',str(config),'--request',str(req),'--output',str(output),'--trusted-workflows','--workflow',workflow]
-                if name in authenticated_scopes:command.append('--require-current-admin')
+                if policy.get('profile_catalog'):
+                    templates=pathlib.Path(tmp)/'profiles.json';templates.write_text(json.dumps(catalog));templates.chmod(0o600)
+                    command.extend(['--profile-catalog',str(templates)])
+                if scope_name(entry) in authenticated_scopes:command.append('--require-current-admin')
                 if mode=='repository':
                     command.append('--repository-only')
                     if not request['repository'].get('private'):command.append('--allow-public-repository')
@@ -550,12 +578,13 @@ def main():
             scope=candidate['scopes'][name]
             # Policy defines exact enabled queues, not a permanent union.
             scope['profiles']={q:p for q,p in scope['profiles'].items() if q in request['queues']}
-            scope['max_vms']=request['max_vms']
-            for profile in scope['profiles'].values():profile['max_vms']=min(profile['max_vms'],request['max_vms'])
+            if name!='primary':scope['max_vms']=request['max_vms']
+            if name!='primary':
+                for profile in scope['profiles'].values():profile['max_vms']=min(profile['max_vms'],request['max_vms'])
             scope.pop('disabled',None)
-            enabled=list(scope['profiles']);status='active';applied_workflow='' if mode=='repository' else workflow;applied_access=mode
+            enabled=list(scope['profiles']);status='active';applied_workflow='' if mode in ('repository','organization') else workflow;applied_access='repository' if mode=='organization' else mode
             if set(entry.get('queues') or ['chickadee'])-set(enabled):message='Additional queue requests are awaiting operator approval.'
-        if entry.get('id'):updates.append({'id':entry['id'],'status':status,'enabled_queues':enabled,'enabled_workflow_path':applied_workflow,'enabled_workflow_access':applied_access,'message':message})
+        if entry.get('id'):updates.append({'id':entry['id'],**({'applied_organization_access':entry['organization_access']} if status=='active' and entry.get('organization_access') is not None else {}),'status':status,'enabled_queues':enabled,'enabled_workflow_path':applied_workflow,'enabled_workflow_access':applied_access,'message':message})
         elif status=='active':updates.append({'id':'','status':status,'enabled_queues':enabled,'message':message,'_import':dict(entry,queues=request['queues'],enabled_queues=enabled,status='active',scope=('organization' if entry['account']['type']=='Organization' else 'repository'))})
     if candidate!=original:
         if site_available:
