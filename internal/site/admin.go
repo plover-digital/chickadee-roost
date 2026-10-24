@@ -23,13 +23,14 @@ func (s *Server) AdminHandler() http.Handler {
 	})
 	mux.HandleFunc("POST /status", func(w http.ResponseWriter, r *http.Request) {
 		var update struct {
-			ID                    string     `json:"id"`
-			Status                string     `json:"status"`
-			EnabledQueues         []string   `json:"enabled_queues"`
-			Message               string     `json:"message"`
-			Usage                 []UsageDay `json:"usage"`
-			EnabledWorkflowPath   *string    `json:"enabled_workflow_path"`
-			EnabledWorkflowAccess *string    `json:"enabled_workflow_access"`
+			AppliedOrganizationAccess *OrganizationAccess `json:"applied_organization_access"`
+			ID                        string              `json:"id"`
+			Status                    string              `json:"status"`
+			EnabledQueues             []string            `json:"enabled_queues"`
+			Message                   string              `json:"message"`
+			Usage                     []UsageDay          `json:"usage"`
+			EnabledWorkflowPath       *string             `json:"enabled_workflow_path"`
+			EnabledWorkflowAccess     *string             `json:"enabled_workflow_access"`
 		}
 		decoder := json.NewDecoder(http.MaxBytesReader(w, r.Body, 8192))
 		decoder.DisallowUnknownFields()
@@ -80,6 +81,13 @@ func (s *Server) AdminHandler() http.Handler {
 			entries[i].Status = update.Status
 			entries[i].EnabledQueues = update.EnabledQueues
 			entries[i].Message = update.Message
+			if update.AppliedOrganizationAccess != nil {
+				if !validOrganizationAccess(update.AppliedOrganizationAccess) {
+					http.Error(w, "Invalid applied organization access", 400)
+					return
+				}
+				entries[i].AppliedOrganizationAccess = update.AppliedOrganizationAccess
+			}
 			if update.EnabledWorkflowAccess != nil {
 				entries[i].EnabledWorkflowAccess = *update.EnabledWorkflowAccess
 			}
@@ -121,12 +129,12 @@ func (s *Server) manage(w http.ResponseWriter, r *http.Request) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	for i, entry := range s.enrollments {
-		if entry.ID != r.FormValue("id") || entry.User.ID != v.User.ID {
+		if entry.ID != r.FormValue("id") || entry.User.ID != v.User.ID && !organizationOwner(choices, entry) {
 			continue
 		}
 		authorized := false
 		for _, choice := range choices {
-			if choice.Installation.ID == entry.InstallationID && choice.Repository.ID == entry.Repository.ID {
+			if choice.authorizes(entry) {
 				authorized = true
 				break
 			}
@@ -137,6 +145,10 @@ func (s *Server) manage(w http.ResponseWriter, r *http.Request) {
 		}
 		entries := append([]Enrollment(nil), s.enrollments...)
 		entries[i].DesiredState = action
+		if entry.OrganizationAccess != nil {
+			entries[i].User = v.User
+			entries[i].Authenticated = true
+		}
 		entries[i].Updated = time.Now().UTC()
 		// The reconciler reports applied state; customer requests never claim it.
 		if s.saveLocked(entries) != nil {

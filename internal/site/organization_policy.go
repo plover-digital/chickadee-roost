@@ -38,6 +38,9 @@ func organizationConstraint(entries []Enrollment, user User, choice Choice) stri
 		return ""
 	}
 	current := canonicalOrganization(entries, choice.Installation.Account.ID)
+	if current != nil && choice.OrganizationAdmin && current.InstallationID == choice.Installation.ID {
+		return ""
+	}
 	if current != nil && (current.User.ID != user.ID || current.InstallationID != choice.Installation.ID || current.Repository.ID != choice.Repository.ID) {
 		return organizationLimitMessage
 	}

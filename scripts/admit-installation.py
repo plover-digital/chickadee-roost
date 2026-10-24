@@ -9,8 +9,8 @@ import argparse, copy, importlib.util, json, os, pathlib, re, urllib.request
 spec=importlib.util.spec_from_file_location('setup_app',pathlib.Path(__file__).with_name('setup-app.py'))
 setup=importlib.util.module_from_spec(spec);spec.loader.exec_module(setup)
 
-def requested_profiles(c, request):
-    template=c.get('profiles') or c['scopes']['primary']['profiles']
+def requested_profiles(c, request, profile_catalog=None):
+    template=profile_catalog or c.get('profiles') or c['scopes']['primary']['profiles']
     queues=request.get('queues',['chickadee'])
     if not isinstance(queues,list) or len(queues)>len(template) or any(not isinstance(q,str) or q not in template for q in queues):
         raise ValueError('requested queue is not in the host profile catalog')
@@ -23,8 +23,8 @@ def requested_profiles(c, request):
         profile['max_vms']=min(profile['max_vms'],maximum)
     return profiles
 
-def proposed(c, request, installation, repo, group_id):
-    profiles=requested_profiles(c,request)
+def proposed(c, request, installation, repo, group_id, profile_catalog=None):
+    profiles=requested_profiles(c,request,profile_catalog)
     maximum=request.get('max_vms',1)
     if type(maximum)!=int or maximum<1 or maximum>c['limits']['max_vms']:raise ValueError('invalid scope concurrency limit')
     if installation['account']['id']!=request['account']['id'] or installation['account']['type']!=request['account']['type']:
@@ -77,6 +77,81 @@ def validate_repository_only_selection(selected, repository_id):
     if selected['total_count']!=1 or {r['id'] for r in selected['repositories']}!={repository_id}:
         raise ValueError('repository-only approval cannot broaden access for other selected repositories')
 
+def organization_access(request, installation, repositories):
+    policy=request.get('organization_access')
+    if policy is None:return None
+    if installation['account']['type']!='Organization' or not isinstance(policy,dict) or set(policy)-{'repository_selection','repository_ids','workflows'}:
+        raise ValueError('invalid organization access policy')
+    mode=policy.get('repository_selection');ids=policy.get('repository_ids',[]);refs=policy.get('workflows',[])
+    if mode not in ('all','selected') or not isinstance(ids,list) or len(ids)>100 or not isinstance(refs,list) or len(refs)>50:
+        raise ValueError('invalid organization access bounds')
+    if any(type(rid)!=int or rid<=0 for rid in ids) or len(set(ids))!=len(ids) or (mode=='all' and ids) or (mode=='selected' and not ids):raise ValueError('invalid organization repositories')
+    if any(type(r.get('id'))!=int or r['id']<=0 or not isinstance(r.get('full_name'),str) for r in repositories):raise ValueError('invalid installation repository identity')
+    accessible={r['id']:r for r in repositories}
+    if len(accessible)!=len(repositories):raise ValueError('duplicate installation repository')
+    aid=installation['account']['id']
+    selected=accessible.values() if mode=='all' else [accessible.get(rid) for rid in ids]
+    if any(r is None or (type(r.get('owner',{}).get('id'))!=int or r['owner']['id']!=aid) for r in selected):raise ValueError('repository outside installation organization')
+    if mode=='all' and installation.get('repository_selection')!='all':raise ValueError('all-repository organization access requires all-repository App installation')
+    names={r['full_name'] for r in selected}
+    for ref in refs:
+        if not isinstance(ref,str) or len(ref)>300 or not re.fullmatch(r'[A-Za-z0-9-]+/[A-Za-z0-9_.-]+/\.github/workflows/[A-Za-z0-9_-][A-Za-z0-9_.-]{0,99}\.ya?ml@refs/(heads|tags)/[A-Za-z0-9_./-]+',ref) or '/'.join(ref.split('/')[:2]) not in names:
+            raise ValueError('workflow outside selected organization repositories')
+    if len(set(refs))!=len(refs):raise ValueError('duplicate workflow')
+    return {'repository_selection':mode,'repository_ids':sorted(ids),'workflows':sorted(refs)}
+
+
+def current_organization_owner(request, token):
+    user=request['user'];account=request['account']
+    if not re.fullmatch(r'[A-Za-z0-9-]{1,39}',user.get('login','')) or not re.fullmatch(r'[A-Za-z0-9-]{1,39}',account.get('login','')):return False
+    try:member=setup.api('/orgs/'+account['login']+'/memberships/'+user['login'],token=token)
+    except RuntimeError as error:
+        if str(error) in ('GitHub setup API returned HTTP 403','GitHub setup API returned HTTP 404'):return False
+        raise
+    return (member.get('state')=='active' and member.get('role')=='admin'
+            and type(member.get('user',{}).get('id'))==int and member['user']['id']==user['id']
+            and type(member.get('organization',{}).get('id'))==int and member['organization']['id']==account['id'])
+
+
+def organization_group_plan(name, policy):
+    return {'name':name,'visibility':policy['repository_selection'],
+            'selected_repository_ids':policy['repository_ids'], 'allows_public_repositories':True,
+            'restricted_to_workflows':bool(policy['workflows']),'selected_workflows':policy['workflows']}
+
+
+def apply_organization_group(base, token, name, policy, owned=None):
+    plan=organization_group_plan(name,policy)
+    if owned is None:
+        groups=setup.api(base+'?per_page=100',token=token)
+        if any(g['name']==name for g in groups['runner_groups']):raise ValueError('group already exists; recover ownership before retrying')
+        group=setup.api(base,'POST',token,plan)
+    else:
+        path=base+'/'+str(owned['runner_group_id'])
+        group=setup.api(path,token=token)
+        if group.get('id')!=owned['runner_group_id'] or group.get('inherited'):raise ValueError('runner group identity or ownership changed')
+        matching=all(group.get(key)==plan[key] for key in ('visibility','allows_public_repositories','restricted_to_workflows')) and set(group.get('selected_workflows') or [])==set(plan['selected_workflows'])
+        if matching and policy['repository_selection']=='selected':
+            listing=setup.api(path+'/repositories?per_page=100',token=token)
+            matching=listing.get('total_count')==len(policy['repository_ids']) and {r['id'] for r in listing['repositories']}==set(policy['repository_ids'])
+        if matching:return group
+        # Selected ACL is set empty first, so a failed multi-call update cannot
+        # temporarily grant workflows to repositories being removed.
+        if policy['repository_selection']=='selected':
+            setup.api(path,'PATCH',token,{'visibility':'selected'})
+            setup.api(path+'/repositories','PUT',token,{'selected_repository_ids':[]})
+        setup.api(path,'PATCH',token,{k:v for k,v in plan.items() if k not in ('name','selected_repository_ids')})
+        if policy['repository_selection']=='selected':setup.api(path+'/repositories','PUT',token,{'selected_repository_ids':policy['repository_ids']})
+    path=base+'/'+str(group['id'])
+    actual=setup.api(path,token=token)
+    for key in ('visibility','allows_public_repositories','restricted_to_workflows'):
+        if actual.get(key)!=plan[key]:raise ValueError('runner group policy not acknowledged')
+    if set(actual.get('selected_workflows') or [])!=set(plan['selected_workflows']):raise ValueError('runner workflow policy not acknowledged')
+    if policy['repository_selection']=='selected':
+        listing=setup.api(path+'/repositories?per_page=100',token=token)
+        if listing.get('total_count')!=len(policy['repository_ids']) or {r['id'] for r in listing['repositories']}!=set(policy['repository_ids']):raise ValueError('runner repository policy not acknowledged')
+    return actual
+
+
 def runner_group_plan(name, repo, ref, repository_only=False, allow_public_repository=False):
     if allow_public_repository and not repository_only:raise ValueError('public repository flag requires repository-only approval')
     if repository_only and not repo['private'] and not allow_public_repository:
@@ -88,6 +163,7 @@ def runner_group_plan(name, repo, ref, repository_only=False, allow_public_repos
 
 def main():
     p=argparse.ArgumentParser(description=__doc__)
+    p.add_argument('--profile-catalog',help='operator-maintained full profile template JSON, independent of enabled scopes')
     p.add_argument('--config',required=True);p.add_argument('--request',required=True);p.add_argument('--output',required=True)
     p.add_argument('--trusted-workflows',action='store_true',help='operator has reviewed beta trust and workflow policy')
     p.add_argument('--repository-only',action='store_true',help='explicit operator approval for every workflow in the one selected private organization repository')
@@ -99,9 +175,10 @@ def main():
     if not args.trusted_workflows:raise ValueError('operator admission and trusted-workflow review required')
     if not re.fullmatch(r'\.github/workflows/[A-Za-z0-9_-]+\.ya?ml',args.workflow):raise ValueError('use one main-branch workflow file')
     c=json.load(open(args.config));request=json.load(open(args.request))
+    profile_catalog=json.load(open(args.profile_catalog)) if args.profile_catalog else None
     if args.queue is not None:request['queues']=args.queue
     if not c.get('profiles') and not c.get('scopes'):raise ValueError('first migrate flat config to the image/profile catalog')
-    requested_profiles(c,request) # Reject unknown queues before any GitHub mutation.
+    requested_profiles(c,request,profile_catalog) # Reject unknown queues before any GitHub mutation.
     iid=request['installation_id'];rid=request['repository']['id']
     if type(iid)!=int or iid<=0 or type(rid)!=int or rid<=0:raise ValueError('invalid installation/repository ID')
     jwt=setup.app_jwt(c['app_client_id'],pathlib.Path(c['app_key_file']))
@@ -112,14 +189,22 @@ def main():
     if account['type'] not in ('User','Organization'):raise ValueError('unsupported account type')
     needed='organization_self_hosted_runners' if account['type']=='Organization' else 'administration'
     if installation['permissions'].get(needed)!='write':raise ValueError('runner-management permission not approved')
-    token=setup.api('/app/installations/'+str(iid)+'/access_tokens','POST',jwt,{'permissions':{needed:'write','metadata':'read'}})['token']
-    repo=None
+    permissions={needed:'write','metadata':'read'}
+    if request.get('organization_access') is not None:
+        if installation['permissions'].get('members')!='read':raise ValueError('organization access requires Members read permission')
+        permissions['members']='read'
+    token=setup.api('/app/installations/'+str(iid)+'/access_tokens','POST',jwt,{'permissions':permissions})['token']
+    repo=None;repositories=[]
     for page in range(1,11):
         listing=setup.api('/installation/repositories?per_page=100&page='+str(page),token=token)
+        repositories.extend(listing['repositories'])
         for item in listing['repositories']:
             if item['id']==rid:repo=item
-        if repo is not None or len(listing['repositories'])<100:break
-    if repo is None:raise ValueError('repository not selected for this App installation')
+        if (repo is not None and request.get('organization_access') is None) or len(listing['repositories'])<100:break
+    else:raise ValueError('installation repository inventory exceeds limit')
+    if repo is None:
+        if request.get('organization_access') is None:raise ValueError('repository not selected for this App installation')
+        repo=request['repository'] # Legacy enrollment anchor; organization policy is verified independently below.
     # Validate identities before any runner-group mutation.
     if account['id']!=request['account']['id'] or account['type']!=request['account']['type'] or repo['full_name']!=request['repository']['full_name']:
         raise ValueError('request identity no longer matches GitHub')
@@ -128,8 +213,10 @@ def main():
     if args.allow_public_repository and not args.repository_only:raise ValueError('public repository flag requires repository-only approval')
     if args.repository_only and (account['type']!='Organization' or (not repo['private'] and not args.allow_public_repository)):
         raise ValueError('repository-only access requires an approved private organization repository')
-    if args.require_current_admin and account['type']=='Organization' and not current_repository_admin(request,token):
+    if args.require_current_admin and account['type']=='Organization' and request.get('organization_access') is None and not current_repository_admin(request,token):
         raise ValueError('requester must currently administer the selected repository')
+    policy=organization_access(request,installation,repositories)
+    if policy is not None and not current_organization_owner(request,token):raise ValueError('current organization owner required')
     group_id=1
     if account['type']=='Organization':
         org=account['login'];base='/orgs/'+org+'/actions/runner-groups'
@@ -138,9 +225,11 @@ def main():
         own=next((scope for scope in scopes.values() if scope['github_url'].lower().rstrip('/')==('https://github.com/'+org).lower()),None)
         ref=repo['full_name']+'/'+args.workflow+'@refs/heads/main'
         if own is not None:
-            if own is scopes.get('primary'):raise ValueError('customer admission cannot mutate operator primary scope')
+            if own is scopes.get('primary') and policy is None:raise ValueError('customer admission cannot mutate operator primary scope')
             validate_owned_scope(own,installation)
-        if own is None:
+        if policy is not None:
+            group=apply_organization_group(base,token,'chickadee-'+str(installation['app_id'])+'-'+str(iid),policy,own)
+        elif own is None:
             # Do not adopt/mutate an unrelated group by its name on retry.
             name='chickadee-'+str(installation['app_id'])+'-'+str(iid)
             groups=setup.api(base+'?per_page=100',token=token)
@@ -159,7 +248,7 @@ def main():
                 setup.api(base+'/'+str(group['id'])+'/repositories/'+str(rid),'PUT',token)
                 group=setup.api(base+'/'+str(group['id']),'PATCH',token,{'restricted_to_workflows':True,'selected_workflows':sorted(refs),'allows_public_repositories':group['allows_public_repositories'] or not repo['private']})
         group_id=group['id']
-    output=proposed(c,request,installation,repo,group_id)
+    output=proposed(c,request,installation,repo,group_id,profile_catalog)
     path=pathlib.Path(args.output)
     fd=os.open(path,os.O_CREAT|os.O_EXCL|os.O_WRONLY,0o600)
     with os.fdopen(fd,'w') as f:json.dump(output,f,indent=2);f.write('\n');f.flush();os.fsync(f.fileno())

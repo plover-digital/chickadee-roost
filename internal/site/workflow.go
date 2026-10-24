@@ -1,17 +1,23 @@
 package site
 
-import "regexp"
+import (
+	"reflect"
+	"regexp"
+)
 
 var workflowPathPattern = regexp.MustCompile(`^\.github/workflows/[A-Za-z0-9_-][A-Za-z0-9_.-]{0,99}\.ya?ml$`)
 
 func validWorkflowPath(path string) bool { return workflowPathPattern.MatchString(path) }
 func (e Enrollment) RequestedWorkflowRef() string {
-	if e.Account.Type != "Organization" || !validWorkflowPath(e.WorkflowPath) {
+	if e.OrganizationAccess != nil || e.Account.Type != "Organization" || !validWorkflowPath(e.WorkflowPath) {
 		return ""
 	}
 	return e.Repository.Name + "/" + e.WorkflowPath + "@refs/heads/main"
 }
 func (e Enrollment) WorkflowChangesPending() bool {
+	if e.OrganizationAccess != nil {
+		return !reflect.DeepEqual(e.OrganizationAccess, e.AppliedOrganizationAccess)
+	}
 	return e.Account.Type == "Organization" && e.EnabledWorkflowAccess != "repository" && e.WorkflowPath != "" && e.WorkflowPath != e.EnabledWorkflowPath
 }
 func (e Enrollment) WorkflowFile() string {

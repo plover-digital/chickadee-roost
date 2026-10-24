@@ -39,7 +39,11 @@ select a physical host.
 
 New accounts start with only `chickadee`. Operators can retain manual admission
 or opt into automatic activation for GitHub-authenticated owners/administrators.
-Eligible accounts can opt into supported queues. Requested selection remains distinct
+Eligible accounts can opt into supported queues. Organization owners default to
+all organization repositories, with selected-repository and exact-workflow
+controls available in setup. Existing restricted enrollments keep their policy
+until explicitly updated. Organization owner verification requires App Members
+read permission. Requested selection remains distinct
 from applied availability. Organization usage describes its shared scope;
 personal repositories remain separate. The graph shows completed reserved VM
 time, including runner connection and cleanup, not billable job minutes.

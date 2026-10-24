@@ -28,6 +28,18 @@ class AccountUsageTests(unittest.TestCase):
         self.assertEqual(values[0]['observed_at'],self.now.isoformat())
         self.assertEqual(values[0]['usage'][-2],{'date':'2026-10-06','vm_seconds':60.0,'vms':0})
         self.assertEqual(values[0]['usage'][-1],{'date':'2026-10-07','vm_seconds':60.0,'vms':1})
+    def test_all_repository_usage_requires_complete_installation_boundary(self):
+        self.visibility='all'
+        old=self.api
+        def api(path,*a,**kw):
+            value=old(path,*a,**kw)
+            if path=='/app/installations/11':value['repository_selection']='all'
+            return value
+        result=m.collect_account_usage({'scopes':{'primary':self.scope}},[], 'fixture',api,self.now)
+        self.assertEqual(result[0]['repository_selection'],'all')
+        self.assertEqual(result[0]['repository_ids'],[42])
+        self.repo['owner']['id']=99
+        self.assertEqual(m.collect_account_usage({'scopes':{'primary':self.scope}},[], 'fixture',api,self.now),[])
     def test_acl_failure_omits_no_intersection(self):
         self.selected.append({'id':43,'owner':{'id':22}})
         self.assertEqual(self.collect(),[])

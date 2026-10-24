@@ -19,15 +19,16 @@ type RunnerActivity struct {
 	Credentialed int    `json:"credentialed"`
 }
 type AccountUsage struct {
-	Resources      []ResourceRun    `json:"resources,omitempty"`
-	LiveAt         time.Time        `json:"live_at,omitempty"`
-	Runners        []RunnerActivity `json:"runners,omitempty"`
-	ObservedAt     time.Time        `json:"observed_at"`
-	InstallationID int64            `json:"installation_id"`
-	AccountID      int64            `json:"account_id"`
-	AccountType    string           `json:"account_type"`
-	RepositoryIDs  []int64          `json:"repository_ids"`
-	Usage          []UsageDay       `json:"usage"`
+	RepositorySelection string           `json:"repository_selection,omitempty"`
+	Resources           []ResourceRun    `json:"resources,omitempty"`
+	LiveAt              time.Time        `json:"live_at,omitempty"`
+	Runners             []RunnerActivity `json:"runners,omitempty"`
+	ObservedAt          time.Time        `json:"observed_at"`
+	InstallationID      int64            `json:"installation_id"`
+	AccountID           int64            `json:"account_id"`
+	AccountType         string           `json:"account_type"`
+	RepositoryIDs       []int64          `json:"repository_ids"`
+	Usage               []UsageDay       `json:"usage"`
 }
 
 func (a AccountUsage) key() string {
@@ -64,6 +65,9 @@ func validAccountUsage(entries []AccountUsage, now time.Time) bool {
 		if a.ObservedAt.IsZero() || a.ObservedAt.After(now.Add(time.Minute)) || a.ObservedAt.Before(now.Add(-5*time.Minute)) {
 			return false
 		}
+		if a.RepositorySelection != "" && (a.RepositorySelection != "all" || a.AccountType != "Organization") {
+			return false
+		}
 		if a.InstallationID <= 0 || a.AccountID <= 0 || (a.AccountType != "User" && a.AccountType != "Organization") || len(a.RepositoryIDs) == 0 || len(a.RepositoryIDs) > 100 || a.AccountType == "User" && len(a.RepositoryIDs) != 1 || !validUsage(a.Usage, now) {
 			return false
 		}
@@ -84,6 +88,14 @@ func validAccountUsage(entries []AccountUsage, now time.Time) bool {
 }
 func (a AccountUsage) authorized(p page) bool {
 	if a.ObservedAt.Before(time.Now().Add(-5*time.Minute)) || p.User == nil || a.AccountType == "User" && a.AccountID != p.User.ID {
+		return false
+	}
+	if a.RepositorySelection == "all" {
+		for _, c := range p.Choices {
+			if c.Installation.ID == a.InstallationID && c.Installation.Account.ID == a.AccountID && c.OrganizationAdmin {
+				return true
+			}
+		}
 		return false
 	}
 	for _, id := range a.RepositoryIDs {
