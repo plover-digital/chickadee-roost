@@ -37,6 +37,16 @@ def api(path, method="GET", token=None, body=None):
             raise ValueError("GitHub response exceeds setup limit")
         return json.loads(data) if data else None
     except urllib.error.HTTPError as e:
+        headers=e.headers or {}
+        if e.code==429 or (e.code==403 and (headers.get("Retry-After") or headers.get("X-RateLimit-Remaining")=="0")):
+            raise RuntimeError("GitHub setup API temporarily rate limited") from None
+        if e.code==403:
+            try:
+                problem=json.loads(e.read(1024))
+                message=problem.get('message','') if isinstance(problem,dict) else ''
+            except (ValueError,UnicodeError):message=''
+            if isinstance(message,str) and 'rate limit' in message.lower():
+                raise RuntimeError("GitHub setup API temporarily rate limited") from None
         raise RuntimeError(f"GitHub setup API returned HTTP {e.code}") from None
     except (urllib.error.URLError, json.JSONDecodeError):
         raise RuntimeError("GitHub setup API request failed") from None

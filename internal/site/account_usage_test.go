@@ -17,7 +17,7 @@ func TestAccountUsagePrimaryScopeAuthorizationAndDedup(t *testing.T) {
 	if len(p.TotalUsage().Usage) != 0 {
 		t.Fatal("partial repository administration leaked org total")
 	}
-	p.Choices = append(p.Choices, Choice{Installation: Installation{ID: 8, Account: account}, Repository: Repository{ID: 100}})
+	p.Choices = append(p.Choices, Choice{OrganizationAdmin: true, Installation: Installation{ID: 8, Account: account}, Repository: Repository{ID: 100}})
 	if p.TotalUsage().UsageChart().TotalMinutes != "10.0" {
 		t.Fatal("operator scope without enrollment missing")
 	}

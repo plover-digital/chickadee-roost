@@ -2,7 +2,7 @@ package site
 
 // QueuesSettled keeps approval detail visible until requested grants are applied.
 func (e Enrollment) QueuesSettled() bool {
-	if e.Status != "active" {
+	if e.Status != "active" || e.WorkflowChangesPending() {
 		return false
 	}
 	requested := e.Queues

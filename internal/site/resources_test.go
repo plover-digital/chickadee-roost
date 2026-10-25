@@ -17,7 +17,7 @@ func TestResourceDashboardACLAndBounds(t *testing.T) {
 	if len(p.ResourceRuns()) != 0 {
 		t.Fatal("partial org role leaked metrics")
 	}
-	p.Choices = append(p.Choices, Choice{Installation: Installation{ID: 9, Account: account}, Repository: Repository{ID: 11}})
+	p.Choices = append(p.Choices, Choice{OrganizationAdmin: true, Installation: Installation{ID: 9, Account: account}, Repository: Repository{ID: 11}})
 	if len(p.ResourceRuns()) != 1 || run.CPUAverage() != "50.0%" {
 		t.Fatal("authorized metrics absent")
 	}

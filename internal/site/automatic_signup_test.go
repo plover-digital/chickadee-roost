@@ -17,12 +17,15 @@ func TestAutomaticSignupOrgRequestsKeepWorkflowPolicyOnBackend(t *testing.T) {
 			s.cfg.AutomaticActivation = true
 			s.sessions["session"] = session{User: User{7, "tester"}, Token: "fixture", CSRF: "csrf", Expires: time.Now().Add(time.Hour)}
 			s.http.Transport = transport(func(r *http.Request) (*http.Response, error) {
+				if r.URL.Path == "/user/memberships/orgs/example" {
+					return response(`{"state":"active","role":"admin","organization":{"id":10},"user":{"id":7}}`), nil
+				}
 				if strings.HasPrefix(r.URL.Path, "/user/installations/") {
 					return response(fmt.Sprintf(`{"total_count":1,"repositories":[{"id":99,"full_name":"example/repo","private":%t,"permissions":{"admin":true}}]}`, private)), nil
 				}
-				return response(`{"total_count":1,"installations":[{"id":8,"app_id":42,"account":{"id":10,"login":"example","type":"Organization"},"permissions":{"organization_self_hosted_runners":"write"}}]}`), nil
+				return response(`{"total_count":1,"installations":[{"id":8,"app_id":42,"account":{"id":10,"login":"example","type":"Organization"},"permissions":{"organization_self_hosted_runners":"write","members":"read"}}]}`), nil
 			})
-			form := url.Values{"csrf": {"csrf"}, "installation_id": {"8"}, "repository_id": {"99"}, "private": {"true"}, "enabled_workflow_access": {"repository"}}
+			form := url.Values{"organization_access_version": {"1"}, "repository_access": {"all"}, "csrf": {"csrf"}, "installation_id": {"8"}, "repository_id": {"99"}, "private": {"true"}, "enabled_workflow_access": {"repository"}}
 			post := func(origin string) int {
 				r := httptest.NewRequest("POST", "/enroll", strings.NewReader(form.Encode()))
 				r.Header.Set("Content-Type", "application/x-www-form-urlencoded")

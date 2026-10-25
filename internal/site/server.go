@@ -59,11 +59,17 @@ type Repository struct {
 	Permissions map[string]bool `json:"permissions"`
 }
 type Choice struct {
+	OrganizationAdmin  bool
+	RepositoryOptions  []Repository
+	LegacyRepository   Repository
+	OrganizationAccess *OrganizationAccess
+
 	Installation          Installation
 	Repository            Repository
 	SelectedQueues        []string
 	WorkflowPath          string
 	EnabledWorkflowAccess string
+	EnabledWorkflowPath   string
 	EnrollmentNotice      string
 }
 
@@ -77,6 +83,9 @@ func (c Choice) HasQueue(queue string) bool {
 }
 
 type Enrollment struct {
+	OrganizationAccess        *OrganizationAccess `json:"organization_access,omitempty"`
+	AppliedOrganizationAccess *OrganizationAccess `json:"applied_organization_access,omitempty"`
+
 	Authenticated         bool       `json:"authenticated,omitempty"`
 	ID                    string     `json:"id"`
 	User                  User       `json:"user"`
@@ -165,6 +174,11 @@ func New(c Config) (*Server, error) {
 		}
 	} else if !os.IsNotExist(e) {
 		return nil, e
+	}
+	for _, entry := range s.enrollments {
+		if !validOrganizationAccess(entry.OrganizationAccess) || !validOrganizationAccess(entry.AppliedOrganizationAccess) || entry.Account.Type != "Organization" && (entry.OrganizationAccess != nil || entry.AppliedOrganizationAccess != nil) {
+			return nil, errors.New("invalid stored organization access")
+		}
 	}
 	s.mux.HandleFunc("GET /{$}", s.home)
 	s.mux.HandleFunc("GET /login", s.login)
@@ -297,8 +311,19 @@ func (s *Server) fetch(ctx context.Context, path, token string, out any) error {
 		return errors.New("GitHub unavailable")
 	}
 	defer res.Body.Close()
+	if res.StatusCode == 429 || res.StatusCode == 403 && (res.Header.Get("Retry-After") != "" || res.Header.Get("X-RateLimit-Remaining") == "0") {
+		return errors.New("GitHub verification temporarily rate limited")
+	}
 	if res.StatusCode != 200 {
-		return errors.New("GitHub authorization unavailable")
+		if res.StatusCode == 403 {
+			var problem struct {
+				Message string `json:"message"`
+			}
+			if json.NewDecoder(io.LimitReader(res.Body, 1024)).Decode(&problem) == nil && strings.Contains(strings.ToLower(problem.Message), "rate limit") {
+				return errors.New("GitHub verification temporarily rate limited")
+			}
+		}
+		return githubStatusError(res.StatusCode)
 	}
 	b, e := io.ReadAll(io.LimitReader(res.Body, (2<<20)+1))
 	if e != nil || len(b) > 2<<20 || json.Unmarshal(b, out) != nil {
@@ -394,9 +419,17 @@ func (s *Server) choices(ctx context.Context, v session) ([]Choice, error) {
 		if repos.Total > 100 || len(out)+len(repos.Repositories) > 500 {
 			return nil, errors.New("repository list exceeds beta limit")
 		}
+		orgAdmin := false
+		if i.Account.Type == "Organization" && (i.Permissions["members"] == "read" || i.Permissions["members"] == "write") {
+			var err error
+			orgAdmin, err = s.organizationAdmin(ctx, v, i.Account)
+			if err != nil {
+				return nil, err
+			}
+		}
 		for _, repo := range repos.Repositories {
 			if repo.ID > 0 && repo.Permissions["admin"] {
-				out = append(out, Choice{Installation: i, Repository: repo})
+				out = append(out, Choice{Installation: i, Repository: repo, OrganizationAdmin: orgAdmin, RepositoryOptions: repos.Repositories})
 			}
 		}
 	}
@@ -417,20 +450,35 @@ func (s *Server) dashboard(w http.ResponseWriter, r *http.Request) {
 	for i := range p.Choices {
 		p.Choices[i].EnrollmentNotice = organizationConstraint(s.enrollments, v.User, p.Choices[i])
 		for _, entry := range s.enrollments {
-			if entry.User.ID == v.User.ID && entry.InstallationID == p.Choices[i].Installation.ID && entry.Repository.ID == p.Choices[i].Repository.ID {
+			if p.Choices[i].OrganizationAdmin {
+				current := canonicalOrganization(s.enrollments, p.Choices[i].Installation.Account.ID)
+				if current != nil && entry.ID != current.ID {
+					continue
+				}
+			}
+			if (entry.User.ID == v.User.ID || p.Choices[i].OrganizationAdmin && entry.Account.ID == p.Choices[i].Installation.Account.ID) && entry.InstallationID == p.Choices[i].Installation.ID && (entry.Repository.ID == p.Choices[i].Repository.ID || p.Choices[i].OrganizationAdmin && entry.Account.ID == p.Choices[i].Installation.Account.ID) {
 				p.Choices[i].SelectedQueues = append([]string(nil), entry.Queues...)
+				if len(p.Choices[i].SelectedQueues) == 0 {
+					p.Choices[i].SelectedQueues = []string{"chickadee"}
+				}
 				p.Choices[i].WorkflowPath = entry.WorkflowPath
 				p.Choices[i].EnabledWorkflowAccess = entry.EnabledWorkflowAccess
+				p.Choices[i].EnabledWorkflowPath = entry.EnabledWorkflowPath
+				p.Choices[i].OrganizationAccess = entry.OrganizationAccess
+				p.Choices[i].LegacyRepository = entry.Repository
 				break
 			}
 		}
+		if p.Choices[i].Installation.Account.Type == "Organization" && !p.Choices[i].OrganizationAdmin && len(p.Choices[i].SelectedQueues) == 0 && p.Choices[i].EnrollmentNotice == "" {
+			p.Choices[i].EnrollmentNotice = "Organization setup requires an organization owner and the App’s Members read permission. Approve that permission on GitHub and sign in as an owner."
+		}
 	}
 	for _, entry := range s.enrollments {
-		if entry.User.ID == v.User.ID {
+		if entry.User.ID == v.User.ID || organizationOwner(choices, entry) {
 			authorized := false
 			if e == nil {
 				for _, choice := range choices {
-					if choice.Installation.ID == entry.InstallationID && choice.Repository.ID == entry.Repository.ID {
+					if choice.authorizes(entry) {
 						authorized = true
 						break
 					}
@@ -472,7 +520,7 @@ func (s *Server) postSession(w http.ResponseWriter, r *http.Request) (string, se
 		http.Error(w, "Sign in again", 401)
 		return "", v, false
 	}
-	r.Body = http.MaxBytesReader(w, r.Body, 4096)
+	r.Body = http.MaxBytesReader(w, r.Body, postBodyLimit(r.URL.Path))
 	if r.ParseForm() != nil || subtle.ConstantTimeCompare([]byte(r.FormValue("csrf")), []byte(v.CSRF)) != 1 || r.Header.Get("Origin") != s.cfg.PublicURL {
 		http.Error(w, "Invalid request", 403)
 		return "", v, false
@@ -570,11 +618,20 @@ func (s *Server) enroll(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "Repository not authorized", 403)
 		return
 	}
+	access, accessErr := requestedOrganizationAccess(r.PostForm, *choice)
+	if accessErr != nil {
+		http.Error(w, accessErr.Error(), http.StatusForbidden)
+		return
+	}
 	s.mu.Lock()
-	constraint := organizationConstraint(s.enrollments, v.User, *choice)
+	constraint := organizationRequestConstraint(s.enrollments, v.User, *choice, access)
 	s.mu.Unlock()
 	if constraint != "" {
-		http.Error(w, constraint, http.StatusConflict)
+		status := http.StatusConflict
+		if constraint == organizationOwnerSetupMessage {
+			status = http.StatusForbidden
+		}
+		http.Error(w, constraint, status)
 		return
 	}
 	workflowPath := strings.TrimSpace(r.FormValue("workflow_path"))
@@ -587,7 +644,7 @@ func (s *Server) enroll(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	s.mu.Unlock()
-	if choice.Installation.Account.Type == "Organization" && !repositoryAccess && !s.cfg.AutomaticActivation && !validWorkflowPath(workflowPath) || workflowPath != "" && !validWorkflowPath(workflowPath) {
+	if access == nil && choice.Installation.Account.Type == "Organization" && !repositoryAccess && !s.cfg.AutomaticActivation && !validWorkflowPath(workflowPath) || workflowPath != "" && !validWorkflowPath(workflowPath) {
 		http.Error(w, "Enter an exact main-branch workflow path, such as .github/workflows/build.yml.", 400)
 		return
 	}
@@ -598,19 +655,50 @@ func (s *Server) enroll(w http.ResponseWriter, r *http.Request) {
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	if constraint := organizationConstraint(s.enrollments, v.User, *choice); constraint != "" {
-		http.Error(w, constraint, http.StatusConflict)
+	if constraint := organizationRequestConstraint(s.enrollments, v.User, *choice, access); constraint != "" {
+		status := http.StatusConflict
+		if constraint == organizationOwnerSetupMessage {
+			status = http.StatusForbidden
+		}
+		http.Error(w, constraint, status)
 		return
 	}
 	for i, entry := range s.enrollments {
-		if entry.InstallationID == iid && entry.Repository.ID == rid && entry.User.ID == v.User.ID {
+		if access != nil {
+			current := canonicalOrganization(s.enrollments, choice.Installation.Account.ID)
+			if current != nil && current.ID != entry.ID {
+				continue
+			}
+		}
+		if entry.InstallationID == iid && (entry.Repository.ID == rid || access != nil && entry.Account.ID == choice.Installation.Account.ID) && (entry.User.ID == v.User.ID || access != nil && choice.OrganizationAdmin) {
+			if access != nil && len(access.Workflows) == 0 && entry.OrganizationAccess == nil && entry.EnabledWorkflowAccess != "repository" && entry.WorkflowPath == "" && entry.EnabledWorkflowPath == "" && r.FormValue("confirm_all_workflows") != "1" {
+				http.Error(w, "Existing workflow access is unknown. Enter allowed workflow references or explicitly confirm all workflows.", 400)
+				return
+			}
 			entries := append([]Enrollment(nil), s.enrollments...)
 			entries[i].Authenticated = true
+			if entry.OrganizationAccess != nil && (access == nil || !choice.OrganizationAdmin) {
+				http.Error(w, "Organization owner verification is required to change this service", 403)
+				return
+			}
+			entries[i].OrganizationAccess = access
+			if access != nil {
+				entries[i].User = v.User
+			}
+			if access != nil {
+				entries[i].Repository = choice.Repository
+				entries[i].WorkflowPath = ""
+			}
 			entries[i].Queues = queues
-			entries[i].WorkflowPath = workflowPath
+			if access == nil {
+				entries[i].WorkflowPath = workflowPath
+			}
 			entries[i].Updated = time.Now().UTC()
 			if s.cfg.AutomaticActivation && entries[i].Status == "pending" {
 				entries[i].Status = "approved"
+			}
+			if access != nil {
+				entries = replaceOrganizationEnrollment(entries, entries[i])
 			}
 			if e = s.saveLocked(entries); e != nil {
 				http.Error(w, "Request could not be saved", 500)
@@ -633,7 +721,7 @@ func (s *Server) enroll(w http.ResponseWriter, r *http.Request) {
 	if s.cfg.AutomaticActivation {
 		initialStatus = "approved"
 	}
-	entries := append(append([]Enrollment(nil), s.enrollments...), Enrollment{ID: random(), User: v.User, Authenticated: true, InstallationID: iid, Account: choice.Installation.Account, Repository: choice.Repository, Scope: scope, Status: initialStatus, Queues: queues, WorkflowPath: workflowPath, DesiredState: "active", Created: time.Now().UTC()})
+	entries := append(append([]Enrollment(nil), s.enrollments...), Enrollment{OrganizationAccess: access, ID: random(), User: v.User, Authenticated: true, InstallationID: iid, Account: choice.Installation.Account, Repository: choice.Repository, Scope: scope, Status: initialStatus, Queues: queues, WorkflowPath: workflowPath, DesiredState: "active", Created: time.Now().UTC()})
 	if e = s.saveLocked(entries); e != nil {
 		http.Error(w, "Request could not be saved", 500)
 		return
@@ -645,6 +733,9 @@ func (s *Server) saveLocked(entries []Enrollment) error {
 	b, e := json.MarshalIndent(entries, "", "  ")
 	if e != nil {
 		return e
+	}
+	if len(b) > 2<<20 {
+		return errors.New("enrollment store exceeds limit")
 	}
 	f, e := os.CreateTemp(s.cfg.StateDir, ".enrollments-")
 	if e != nil {
@@ -681,4 +772,13 @@ func (s *Server) logout(w http.ResponseWriter, r *http.Request) {
 	s.mu.Unlock()
 	s.cookie(w, "chickadee-session", "", -1)
 	http.Redirect(w, r, "/", 303)
+}
+
+// Organization enrollment has bounded repository IDs and workflow refs. URL
+// encoding those validated fields needs more room than the small manage forms.
+func postBodyLimit(path string) int64 {
+	if path == "/enroll" {
+		return 64 << 10
+	}
+	return 4096
 }

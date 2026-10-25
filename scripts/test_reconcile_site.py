@@ -325,3 +325,13 @@ class ReinstallDisabledConfig(unittest.TestCase):
   self.assertEqual(m.admission_config(wrong,new,authenticated=True),wrong)
   org=copy.deepcopy(new);org['account']['type']='Organization';org['repository']['permissions']={'admin':True}
   self.assertEqual(m.admission_config(config,org,authenticated=True),config)
+
+class CachedPrimaryOrganization(unittest.TestCase):
+ def test_existing_primary_cache_retains_revocation_checks_without_admitting_new_scopes(self):
+  import copy
+  entry={'id':'org','authenticated':True,'user':{'id':6},'account':{'id':3,'type':'Organization','login':'example'},'installation_id':2,'repository':{'id':4,'full_name':'example/repo'},'organization_access':{'repository_selection':'all'},'queues':['chickadee']}
+  config={'scopes':{'primary':{'github_url':'https://github.com/example','app_installation_id':2,'profiles':{'chickadee':{}}}}}
+  requests,trusted,_=m.merge_site_requests([entry],{'auto_approve_authenticated':True},{'chickadee':{}},False,config)
+  self.assertEqual(requests,[entry]);self.assertEqual(trusted,{'org-3'})
+  for changed in [{}, {'scopes':{'primary':dict(config['scopes']['primary'],app_installation_id=99)}}, {'scopes':{'primary':dict(config['scopes']['primary'],github_url='https://github.com/other')}}]:
+   self.assertEqual(m.merge_site_requests([entry],{'auto_approve_authenticated':True},{'chickadee':{}},False,changed)[0],[])

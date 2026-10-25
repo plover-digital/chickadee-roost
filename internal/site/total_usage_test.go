@@ -34,6 +34,7 @@ func TestUserTotalUsageDistinctReposOrgDedupAndAuthorization(t *testing.T) {
 	for i := range p.Choices {
 		if p.Choices[i].Repository.ID == 3 || p.Choices[i].Repository.ID == 4 {
 			p.Choices[i].Installation = Installation{ID: 9, Account: Account{ID: 10, Type: "Organization"}}
+			p.Choices[i].OrganizationAdmin = true
 		}
 	}
 	p.AccountUsage = []AccountUsage{{ObservedAt: time.Now().UTC(), InstallationID: 9, AccountID: 10, AccountType: "Organization", RepositoryIDs: []int64{3, 4}, Usage: o2.Usage}}

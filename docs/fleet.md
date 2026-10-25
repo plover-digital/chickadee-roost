@@ -113,9 +113,10 @@ seven bounded daily `usage` values. The collector must verify actual App
 installation identity and runner-group selected-repository access; never replace
 a broader ACL with an intersection. Omitted scopes disappear, and observations
 expire after five minutes. Personal snapshots require the signed-in owner;
-organization snapshots require current administration access to every repository
-in the verified scope. Scopes with unrestricted/all-repository visibility are
-excluded until a separately verified organization-wide authorization exists.
+organization snapshots require current organization-owner verification, including
+selected-repository groups, because historical usage has no per-repository
+provenance. Selected ACLs remain fully verified; all-repository groups additionally
+require an all-repository App installation and a complete bounded inventory.
 Totals deduplicate enrollment snapshots and include shared organization reserved
 VM time. They do not identify which individual GitHub user triggered a job.
 
