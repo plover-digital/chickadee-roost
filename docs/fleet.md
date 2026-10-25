@@ -197,7 +197,9 @@ than confirmed GitHub job execution. The broker now attempts ordinary GitHub
 runner deregistration after two minutes following acknowledged credential
 delivery. Recovery grants a fresh two-minute grace after authenticated worker
 observation, so slow provisioning cannot consume the listener grace. Requests
-run in the background with at most two in flight, one per execution, and at
+check never-attempted and least-recently-attempted allocations first, preventing
+busy runners from monopolizing retirement attempts. Requests run in the
+background with at most two in flight, one per execution, and at
 least 30 seconds between attempts. Each uses an independent API client and a
 five-second deadline, so the pinned SDK's shared mutex cannot block scheduling.
 The broker cancels and joins those requests before releasing its state lock. It verifies the

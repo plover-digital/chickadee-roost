@@ -168,6 +168,7 @@ func (b *Broker) Sync(ctx context.Context, demands []Demand, workers map[string]
 		}
 		inventory[id] = snapshot
 	}
+	idleCandidates := []int{}
 	for i := range b.assignments {
 		a := b.assignments[i]
 		if a.Phase == Complete {
@@ -226,9 +227,7 @@ func (b *Broker) Sync(ctx context.Context, demands []Demand, workers map[string]
 			continue
 		}
 		if a.Phase == Delivered && record.State == "delivery_intent" {
-			if err := b.retireIdle(ctx, i, backends[a.QueueID], time.Now()); err != nil {
-				return err
-			}
+			idleCandidates = append(idleCandidates, i)
 		}
 		switch a.Phase {
 		case Intent:
@@ -262,6 +261,9 @@ func (b *Broker) Sync(ctx context.Context, demands []Demand, workers map[string]
 				return err
 			}
 		}
+	}
+	if err := b.scheduleIdleChecks(ctx, idleCandidates, backends, time.Now()); err != nil {
+		return err
 	}
 	for _, d := range b.admissionOrder(demands) {
 		if err := ctx.Err(); err != nil {

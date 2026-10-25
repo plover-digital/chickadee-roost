@@ -337,3 +337,71 @@ func TestBlockedIdleChecksDoNotBlockOtherScopesAndAreBounded(t *testing.T) {
 	}
 	waitIdleChecks(t, b)
 }
+
+func TestIdleChecksDoNotStarveLaterAllocationsWhenRetriesBecomeDue(t *testing.T) {
+	b, w, _, d := fixture(t)
+	backend := &idleBackend{}
+	d.ScopeMax = 3
+	d.Assigned = 3
+	workers := map[string]Worker{"worker-a": w}
+	backends := map[string]Backend{d.QueueID: backend}
+	for i := 0; i < 3; i++ {
+		if err := b.Sync(context.Background(), []Demand{d}, workers, backends); err != nil {
+			t.Fatal(err)
+		}
+	}
+	now := time.Now()
+	for _, a := range b.assignments {
+		b.idleSince[a.ID] = now.Add(-3 * time.Minute)
+	}
+	started := make(chan string, 8)
+	release := make(chan struct{})
+	backend.beforeRetire = func(ctx context.Context, name string) {
+		started <- name
+		select {
+		case <-release:
+		case <-ctx.Done():
+		}
+	}
+	candidates := []int{0, 1, 2}
+	if err := b.scheduleIdleChecks(context.Background(), candidates, backends, now); err != nil {
+		t.Fatal(err)
+	}
+	first := map[string]bool{}
+	for i := 0; i < 2; i++ {
+		select {
+		case name := <-started:
+			first[name] = true
+		case <-time.After(time.Second):
+			t.Fatal("checks never started")
+		}
+	}
+	missing := ""
+	for _, a := range b.assignments {
+		if !first[a.RunnerName] {
+			missing = a.RunnerName
+		}
+	}
+	close(release)
+	waitIdleChecks(t, b)
+	// Model a slow reconciliation: the earliest busy checks are due again by
+	// the next scheduling pass. The never-attempted runner must still get a slot.
+	release = make(chan struct{})
+	if err := b.scheduleIdleChecks(context.Background(), candidates, backends, now.Add(time.Minute)); err != nil {
+		t.Fatal(err)
+	}
+	seenMissing := false
+	for i := 0; i < 2; i++ {
+		select {
+		case name := <-started:
+			seenMissing = seenMissing || name == missing
+		case <-time.After(time.Second):
+			t.Fatal("next checks never started")
+		}
+	}
+	close(release)
+	waitIdleChecks(t, b)
+	if !seenMissing {
+		t.Fatal("busy retries starved the later idle allocation")
+	}
+}

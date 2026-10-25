@@ -2,6 +2,7 @@ package fleet
 
 import (
 	"context"
+	"sort"
 	"time"
 )
 
@@ -76,5 +77,23 @@ func (b *Broker) retireIdle(ctx context.Context, index int, backend Backend, now
 		defer cancel()
 		_ = retirer.RetireIdle(requestCtx, a.RunnerName)
 	}()
+	return nil
+}
+
+// Check never-attempted/oldest allocations before retrying busy ones. Fixed
+// journal order can otherwise fill both slots forever during slow Sync cycles.
+func (b *Broker) scheduleIdleChecks(ctx context.Context, candidates []int, backends map[string]Backend, now time.Time) error {
+	sort.Slice(candidates, func(i, j int) bool {
+		a, z := b.assignments[candidates[i]], b.assignments[candidates[j]]
+		if a.RegistrationCheckedAt.Equal(z.RegistrationCheckedAt) {
+			return a.ID < z.ID
+		}
+		return a.RegistrationCheckedAt.Before(z.RegistrationCheckedAt)
+	})
+	for _, index := range candidates {
+		if err := b.retireIdle(ctx, index, backends[b.assignments[index].QueueID], now); err != nil {
+			return err
+		}
+	}
 	return nil
 }
