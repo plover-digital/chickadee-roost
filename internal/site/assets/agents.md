@@ -45,7 +45,12 @@ otherwise agent access returns 503. Normal GitHub browser sign-in remains usable
    enabled for this account or backed by currently idle runner capacity.
 4. GET /api/v1/enrollments for services owned by this user that they can still
    administer. Inspect status, desired_state, queues and enabled_queues.
-5. If authorized by the user, use a manage token to POST /api/v1/enrollments
+5. Complete new organization setup in the browser with a verified organization
+   owner. Organization-wide repository/workflow policies are browser-only in
+   API v1; repository tokens cannot view or change those shared services.
+   Personal services and existing legacy single-repository organization services
+   remain available through the API. If authorized by the user, use a manage
+   token to POST /api/v1/enrollments
    with the verified installation_id, repository_id and full desired queues
    list. This creates or updates the request; omitted queues means the default
    chickadee label only. For organization installations with manual activation,
@@ -68,8 +73,14 @@ otherwise agent access returns 503. Normal GitHub browser sign-in remains usable
 
 The default chickadee label is medium / Ubuntu 26.04. Discover additional labels
 from the API rather than assuming preview platforms are available. Organization
-beta enrollment supports one selected repository and manager per organization;
-enrollment_notice explains conflicts without exposing another customer's data.
+setup supports broader access through the browser. API v1 preserves exact user,
+installation and repository identity for legacy organization records; it cannot
+create a new organization service or adopt organization-owner takeover powers.
+An explicit desired or applied organization policy excludes that service from
+API v1, even if its current policy selects only one repository. An empty API
+enrollment list therefore does not prove the organization service is absent.
+Use the browser dashboard for its status and controls. enrollment_notice explains
+setup requirements without exposing another customer's data.
 
 ## Endpoints
 
@@ -92,6 +103,9 @@ Response: {"automatic_activation":false,"repositories":[{"installation":{"id":8,
 "enrollment_notice":"optional constraint"}]}
 
 GET /api/v1/enrollments
+Personal and legacy organization records only; organization-wide policies are
+excluded. Broader organization control requires a future explicit organization
+token scope, not just a repository-scoped token.
 Response: {"enrollments":[{"id":"opaque-id","installation_id":8,
 "repository":{"id":99,"full_name":"example/repo","private":true,
 "permissions":{"admin":true}},"scope":"repository","status":"pending",
@@ -109,6 +123,9 @@ POST /api/v1/enrollments (manage)
 Body: {"installation_id":8,"repository_id":99,"queues":["chickadee"],
 "workflow_path":".github/workflows/build.yml"}
 workflow_path is optional for personal repositories and automatic activation.
+New organization enrollment and explicit organization access policies require
+browser owner setup; this endpoint can maintain only an existing exact legacy
+organization record. Organization policy fields are not accepted by API v1.
 Unknown fields (including private, authenticated and workflow access grants)
 are rejected. Existing service state is retained when queues are updated;
 use the state endpoint to resume or reconnect a paused/disconnected service.
@@ -151,8 +168,9 @@ Replace the illustrative numeric IDs with verified values from repositories.
 
 Error shape: {"error":{"code":"unauthorized","message":"..."}}.
 401 unauthorized: missing, invalid, revoked or expired token; obtain a new one.
-403 insufficient_scope/forbidden: use an approved manage token or restore GitHub
-administration access. Tokens cannot bypass installation permissions.
+403 insufficient_scope/forbidden: use an approved manage token, restore GitHub
+administration access, or use browser owner setup for organization-wide services.
+Tokens cannot bypass installation permissions or gain broader organization scope.
 400 invalid_request: fix the documented JSON fields, queue names or workflow path.
 409 conflict: organization manager/repository conflict; request operator help.
 415 unsupported_media_type: send Content-Type: application/json.

@@ -227,7 +227,7 @@ func (s *Server) agentAPI(w http.ResponseWriter, r *http.Request) {
 		out := []repositoryChoice{}
 		s.mu.Lock()
 		for _, c := range choices {
-			out = append(out, repositoryChoice{c.Installation, c.Repository, organizationConstraint(s.enrollments, v.User, c)})
+			out = append(out, repositoryChoice{c.Installation, c.Repository, agentOrganizationConstraint(s.enrollments, v.User, c)})
 		}
 		s.mu.Unlock()
 		apiJSON(w, 200, map[string]any{"repositories": out, "automatic_activation": s.cfg.AutomaticActivation})
@@ -312,7 +312,7 @@ func (s *Server) agentEnrollments(w http.ResponseWriter, r *http.Request, v sess
 	out := []enrollmentView{}
 	s.mu.Lock()
 	for _, e := range s.enrollments {
-		if e.User.ID != v.User.ID {
+		if !agentEnrollmentAllowed(v, e, s.enrollments) {
 			continue
 		}
 		for _, c := range choices {
@@ -355,4 +355,31 @@ func (s *Server) agentSchema(w http.ResponseWriter, r *http.Request) {
 	data, _ := assets.ReadFile("assets/openapi.json")
 	w.Header().Set("Content-Type", "application/json; charset=utf-8")
 	_, _ = w.Write(data)
+}
+
+// API v1 delegates exact repositories, not the broader organization-owner
+// authority used by browser setup. Explicit desired or applied organization
+// policy remains browser-only, including transitions between the two policies.
+const agentOrganizationSetupMessage = "Organization-wide service controls require browser owner setup; API v1 supports existing repository services."
+
+func agentEnrollmentAllowed(v session, e Enrollment, entries []Enrollment) bool {
+	if e.User.ID != v.User.ID || !v.AgentRepositories[e.Repository.ID] || e.OrganizationAccess != nil || e.AppliedOrganizationAccess != nil {
+		return false
+	}
+	if e.Account.Type == "Organization" {
+		current := canonicalOrganization(entries, e.Account.ID)
+		if current != nil && (current.OrganizationAccess != nil || current.AppliedOrganizationAccess != nil) {
+			return false
+		}
+	}
+	return true
+}
+func agentOrganizationConstraint(entries []Enrollment, user User, c Choice) string {
+	if c.Installation.Account.Type == "Organization" {
+		current := canonicalOrganization(entries, c.Installation.Account.ID)
+		if current != nil && (current.OrganizationAccess != nil || current.AppliedOrganizationAccess != nil) {
+			return agentOrganizationSetupMessage
+		}
+	}
+	return organizationRequestConstraint(entries, user, c, nil)
 }

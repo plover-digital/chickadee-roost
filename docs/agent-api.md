@@ -20,7 +20,14 @@ restarts. Browser logout does not revoke them; use the account-wide token list
 to revoke access. Each token has a maximum lifetime of 90 days and is restricted
 to selected repository IDs. Discovery and mutation recheck current GitHub admin
 access and intersect it with those IDs. New repositories never expand an existing
-token. Current organization restrictions and admission policy still apply.
+token. Organization-wide repository/workflow policy controls remain browser-only
+in API v1: records with explicit desired or applied organization policy are
+excluded from API reads and mutations, even for verified owners or a policy
+currently selecting only one repository. The API can maintain an existing legacy
+organization enrollment only for its exact recorded user, installation and
+repository; new organization setup requires the browser. This prevents a token
+for one repository acquiring shared organization-owner authority. Personal
+repository operations remain available. Current admission policy still applies.
 Revocation prevents subsequent requests; an already authorized in-flight request
 may finish. The API cannot mint or refresh Chickadee tokens.
 
@@ -78,7 +85,11 @@ Existing sign-ins without refresh metadata must sign in again to create tokens.
 This adds the Roost service API **v1** under `/api/v1/` and encrypted agent-state
 format **1**. Workerapi v1, stored enrollment fields, cookies, callback URL,
 operator bridge, broker, standalone operation and service admission stay
-compatible. No external database is added. No engine repository change is needed.
+compatible relative to current main. No external database is added. No engine
+repository change is needed. Preserve the separate [organization-access rollout
+requirements](onboarding-site.md#organization-repository-and-workflow-access-v1)
+when upgrading from source older than that feature; this API does not replace
+its controller/bridge acknowledgement or migration requirements.
 
 1. Review the credential design and source, then provision the encryption key
    through private operator tooling. Preserve existing state and credentials.

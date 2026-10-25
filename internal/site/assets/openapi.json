@@ -3,7 +3,7 @@
   "info": {
     "title": "Chickadee Roost service API",
     "version": "1.0.0",
-    "description": "Human GitHub onboarding creates named, repository-scoped tokens at /settings/tokens. Tokens default to read-only and 30 days, with 1/7/30/90-day choices. Send Authorization: Bearer TOKEN. Normal browser cookies cannot authenticate this API. GitHub still schedules jobs; this API is not a VM execution API. GET routes also support HEAD. Bounded beta lists have no pagination. See /agents.md for approval, state, error and retry semantics."
+    "description": "Human GitHub onboarding creates named, repository-scoped tokens at /settings/tokens. Tokens default to read-only and 30 days, with 1/7/30/90-day choices. Send Authorization: Bearer TOKEN. Normal browser cookies cannot authenticate this API. GitHub still schedules jobs; this API is not a VM execution API. GET routes also support HEAD. Bounded beta lists have no pagination. See /agents.md for approval, state, error and retry semantics. Organization-wide repository/workflow policies require browser owner setup and are excluded from API v1. Existing legacy organization records require their exact recorded user, installation and repository; new organization enrollment is browser-only."
   },
   "servers": [
     {
@@ -257,7 +257,7 @@
       "get": {
         "operationId": "listEnrollments",
         "summary": "List this user\u2019s authorized service requests and applied state",
-        "description": "Requires read or manage scope. Repository-sensitive reads recheck current GitHub administration access.",
+        "description": "Requires read or manage scope. Repository-sensitive reads recheck current GitHub administration access. Explicit desired/applied organization policies are excluded.",
         "responses": {
           "200": {
             "description": "Success",
@@ -334,7 +334,7 @@
       "post": {
         "operationId": "requestEnrollment",
         "summary": "Create or update a repository\u2019s desired queue selection",
-        "description": "Requires manage scope. A saved request does not change applied runner state until reconciliation.",
+        "description": "Requires manage scope. A saved request does not change applied runner state until reconciliation. New organization setup and explicit organization policy changes require the browser; existing exact legacy organization requests may be maintained.",
         "responses": {
           "202": {
             "description": "Request accepted for reconciliation",
@@ -461,7 +461,7 @@
       "post": {
         "operationId": "requestState",
         "summary": "Request activation/resume, pause or disconnection",
-        "description": "Requires manage scope. A saved request does not change applied runner state until reconciliation.",
+        "description": "Requires manage scope. A saved request does not change applied runner state until reconciliation. Organization-wide policies and another owner\u2019s enrollment are outside repository token authority.",
         "responses": {
           "202": {
             "description": "Request accepted for reconciliation",

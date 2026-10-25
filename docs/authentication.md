@@ -24,7 +24,12 @@ users to sign in again. Refresh tokens are not retained unless persistent agent
 delegation is explicitly enabled as described below.
 
 The dashboard reads installations and repositories through GitHub using that user's
-App token. Repository administration permission is required to select a repository;
+App token. New organization setup requires current active organization-owner membership and
+App Members read permission. Owners configure all organization repositories by
+default, or selected repositories and workflow allowlists. Legacy restricted
+organization records retain their policy until an owner submits an explicit
+update. Repository administration permission is required for personal and legacy
+repository setup;
 a personal installation also requires the signed-in user to own the installation.
 Repository access alone does not authorize service management. Enrollment and management
 requests recheck GitHub access and require both a CSRF token and the exact site Origin.
@@ -83,6 +88,7 @@ Use your own public GitHub App and configure:
 - Setup URL: `https://YOUR-DOMAIN/setup`.
 - Repository Administration read/write for personal repository runners.
 - Organization Self-hosted runners read/write for organization runners.
+- Organization Members read for organization-owner verification on the website and backend.
 - Leave callback wildcard matching and Device Flow disabled.
 - Keep user access token expiration enabled.
 

@@ -23,15 +23,16 @@ func (s *Server) AdminHandler() http.Handler {
 	})
 	mux.HandleFunc("POST /status", func(w http.ResponseWriter, r *http.Request) {
 		var update struct {
-			ID                    string     `json:"id"`
-			Status                string     `json:"status"`
-			EnabledQueues         []string   `json:"enabled_queues"`
-			Message               string     `json:"message"`
-			Usage                 []UsageDay `json:"usage"`
-			EnabledWorkflowPath   *string    `json:"enabled_workflow_path"`
-			EnabledWorkflowAccess *string    `json:"enabled_workflow_access"`
+			AppliedOrganizationAccess *OrganizationAccess `json:"applied_organization_access"`
+			ID                        string              `json:"id"`
+			Status                    string              `json:"status"`
+			EnabledQueues             []string            `json:"enabled_queues"`
+			Message                   string              `json:"message"`
+			Usage                     []UsageDay          `json:"usage"`
+			EnabledWorkflowPath       *string             `json:"enabled_workflow_path"`
+			EnabledWorkflowAccess     *string             `json:"enabled_workflow_access"`
 		}
-		decoder := json.NewDecoder(http.MaxBytesReader(w, r.Body, 8192))
+		decoder := json.NewDecoder(http.MaxBytesReader(w, r.Body, 32<<10))
 		decoder.DisallowUnknownFields()
 		if decoder.Decode(&update) != nil || decoder.Decode(new(any)) != io.EOF || len(update.Message) > 500 || update.EnabledWorkflowAccess != nil && !validWorkflowAccess(*update.EnabledWorkflowAccess) || !validUsage(update.Usage, time.Now()) || update.EnabledWorkflowPath != nil && *update.EnabledWorkflowPath != "" && !validWorkflowPath(*update.EnabledWorkflowPath) {
 			http.Error(w, "Invalid update", 400)
@@ -80,6 +81,13 @@ func (s *Server) AdminHandler() http.Handler {
 			entries[i].Status = update.Status
 			entries[i].EnabledQueues = update.EnabledQueues
 			entries[i].Message = update.Message
+			if update.AppliedOrganizationAccess != nil {
+				if !validOrganizationAccess(update.AppliedOrganizationAccess) {
+					http.Error(w, "Invalid applied organization access", 400)
+					return
+				}
+				entries[i].AppliedOrganizationAccess = update.AppliedOrganizationAccess
+			}
 			if update.EnabledWorkflowAccess != nil {
 				entries[i].EnabledWorkflowAccess = *update.EnabledWorkflowAccess
 			}
@@ -125,12 +133,16 @@ func (s *Server) manageRequest(w http.ResponseWriter, r *http.Request, v session
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	for i, entry := range s.enrollments {
-		if entry.ID != r.FormValue("id") || entry.User.ID != v.User.ID {
+		if entry.ID != r.FormValue("id") || entry.User.ID != v.User.ID && !organizationOwner(choices, entry) {
 			continue
+		}
+		if v.AgentRepositories != nil && !agentEnrollmentAllowed(v, entry, s.enrollments) {
+			operationError(w, r, "Service is outside this token's repository authority; use browser owner setup for organization-wide controls", 403)
+			return
 		}
 		authorized := false
 		for _, choice := range choices {
-			if choice.Installation.ID == entry.InstallationID && choice.Repository.ID == entry.Repository.ID {
+			if choice.authorizes(entry) {
 				authorized = true
 				break
 			}
@@ -141,6 +153,10 @@ func (s *Server) manageRequest(w http.ResponseWriter, r *http.Request, v session
 		}
 		entries := append([]Enrollment(nil), s.enrollments...)
 		entries[i].DesiredState = action
+		if entry.OrganizationAccess != nil {
+			entries[i].User = v.User
+			entries[i].Authenticated = true
+		}
 		entries[i].Updated = time.Now().UTC()
 		// The reconciler reports applied state; customer requests never claim it.
 		if s.saveLocked(entries) != nil {

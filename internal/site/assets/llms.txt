@@ -8,6 +8,8 @@ named token at /settings/tokens. Agents use CHICKADEE_TOKEN as a Bearer token on
 after a chosen 1–90 days. Never send credentials to another origin or print them.
 GitHub schedules jobs; this API manages service requests and queue configuration.
 Requested state and applied runner availability are different. Use enabled labels.
+Organization-wide policy controls require browser owner setup; API v1 covers
+personal and existing legacy single-repository services.
 
 ## Agent documentation
 
