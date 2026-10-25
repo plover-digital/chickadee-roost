@@ -1,6 +1,7 @@
 package site
 
 import (
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -109,7 +110,7 @@ func TestAllRepositoryUsageRequiresOrganizationOwner(t *testing.T) {
 func TestAnotherVerifiedOwnerUpdatesExistingOrganizationRecord(t *testing.T) {
 	s := orgAccessFixture(t)
 	s.enrollments = []Enrollment{{ID: "org", User: User{8, "former-owner"}, Account: Account{10, "example", "Organization"}, InstallationID: 8, Repository: Repository{ID: 99, Name: "example/one"}, Status: "active", Queues: []string{"chickadee"}}}
-	form := url.Values{"csrf": {"csrf"}, "installation_id": {"8"}, "repository_id": {"100"}, "organization_access_version": {"1"}, "repository_access": {"selected"}, "selected_repository": {"99", "100"}}
+	form := url.Values{"csrf": {"csrf"}, "installation_id": {"8"}, "repository_id": {"100"}, "organization_access_version": {"1"}, "repository_access": {"selected"}, "selected_repository": {"99", "100"}, "confirm_all_workflows": {"1"}}
 	if w := orgPost(s, form); w.Code != 303 {
 		t.Fatalf("verified owner edit: %d %s", w.Code, w.Body.String())
 	}
@@ -126,5 +127,77 @@ func TestLegacyPolicyUsesEnrolledRepositoryWhenOwnerEditorStartsWithAnotherRepo(
 	c.EnabledWorkflowAccess = "repository"
 	if c.WorkflowReferences() != "" {
 		t.Fatal("repository-wide policy gained a stale workflow restriction")
+	}
+}
+
+func TestVersionlessOrganizationCannotCreateOrDuplicateScope(t *testing.T) {
+	for _, owner := range []bool{false, true} {
+		t.Run(fmt.Sprint(owner), func(t *testing.T) {
+			s := orgAccessFixture(t)
+			original := s.http.Transport
+			if !owner {
+				s.http.Transport = transport(func(r *http.Request) (*http.Response, error) {
+					if r.URL.Path == "/user/memberships/orgs/example" {
+						return response(`{"state":"active","role":"member","organization":{"id":10},"user":{"id":7}}`), nil
+					}
+					return original.RoundTrip(r)
+				})
+			}
+			form := url.Values{"csrf": {"csrf"}, "installation_id": {"8"}, "repository_id": {"99"}}
+			if w := orgPost(s, form); w.Code != 403 || len(s.enrollments) != 0 {
+				t.Fatal("versionless new organization bypassed owner setup")
+			}
+			s.enrollments = []Enrollment{{ID: "org", User: User{8, "other-owner"}, Account: Account{10, "example", "Organization"}, InstallationID: 8, Repository: Repository{ID: 99, Name: "example/one"}, Status: "active", Queues: []string{"chickadee"}, OrganizationAccess: &OrganizationAccess{RepositorySelection: "all"}}}
+			form.Set("repository_id", "100")
+			if w := orgPost(s, form); w.Code != 403 || len(s.enrollments) != 1 {
+				t.Fatal("versionless form duplicated organization scope")
+			}
+		})
+	}
+}
+
+func TestOrganizationLookupDistinguishesUnavailableFromDenied(t *testing.T) {
+	for _, code := range []int{403, 404, 503} {
+		t.Run(fmt.Sprint(code), func(t *testing.T) {
+			s := orgAccessFixture(t)
+			old := s.http.Transport
+			s.http.Transport = transport(func(r *http.Request) (*http.Response, error) {
+				if r.URL.Path == "/user/memberships/orgs/example" {
+					res := response(`{}`)
+					res.StatusCode = code
+					return res, nil
+				}
+				return old.RoundTrip(r)
+			})
+			choices, err := s.choices(t.Context(), s.sessions["session"])
+			if code == 503 {
+				if err == nil {
+					t.Fatal("outage treated as lost permission")
+				}
+			} else if err != nil || choices[0].OrganizationAdmin {
+				t.Fatal("denied role not handled safely")
+			}
+		})
+	}
+}
+
+func TestLegacyMigrationKeepsAppliedWorkflowOrRequiresExplicitResolution(t *testing.T) {
+	s := orgAccessFixture(t)
+	s.enrollments = []Enrollment{{ID: "legacy", User: User{7, "owner"}, Account: Account{10, "example", "Organization"}, InstallationID: 8, Repository: Repository{ID: 99, Name: "example/one"}, Status: "active", Queues: []string{"chickadee"}, EnabledWorkflowAccess: "workflow", EnabledWorkflowPath: ".github/workflows/applied.yml"}}
+	req := httptest.NewRequest("GET", "/dashboard", nil)
+	req.AddCookie(&http.Cookie{Name: "__Host-chickadee-session", Value: "session"})
+	w := httptest.NewRecorder()
+	s.ServeHTTP(w, req)
+	if !strings.Contains(w.Body.String(), "example/one/.github/workflows/applied.yml@refs/heads/main") {
+		t.Fatal("known applied workflow was lost in migration editor")
+	}
+	s.enrollments[0].EnabledWorkflowPath = ""
+	form := url.Values{"csrf": {"csrf"}, "installation_id": {"8"}, "repository_id": {"99"}, "organization_access_version": {"1"}, "repository_access": {"all"}}
+	if w := orgPost(s, form); w.Code != 400 || s.enrollments[0].OrganizationAccess != nil {
+		t.Fatal("unknown legacy workflow policy silently broadened")
+	}
+	form.Set("confirm_all_workflows", "1")
+	if w := orgPost(s, form); w.Code != 303 || s.enrollments[0].OrganizationAccess == nil {
+		t.Fatal("explicit workflow resolution was rejected")
 	}
 }

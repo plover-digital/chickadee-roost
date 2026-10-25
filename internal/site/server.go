@@ -69,6 +69,7 @@ type Choice struct {
 	SelectedQueues        []string
 	WorkflowPath          string
 	EnabledWorkflowAccess string
+	EnabledWorkflowPath   string
 	EnrollmentNotice      string
 }
 
@@ -311,7 +312,7 @@ func (s *Server) fetch(ctx context.Context, path, token string, out any) error {
 	}
 	defer res.Body.Close()
 	if res.StatusCode != 200 {
-		return errors.New("GitHub authorization unavailable")
+		return githubStatusError(res.StatusCode)
 	}
 	b, e := io.ReadAll(io.LimitReader(res.Body, (2<<20)+1))
 	if e != nil || len(b) > 2<<20 || json.Unmarshal(b, out) != nil {
@@ -408,8 +409,12 @@ func (s *Server) choices(ctx context.Context, v session) ([]Choice, error) {
 			return nil, errors.New("repository list exceeds beta limit")
 		}
 		orgAdmin := false
-		if i.Account.Type == "Organization" && i.Permissions["members"] == "read" {
-			orgAdmin = s.organizationAdmin(ctx, v, i.Account)
+		if i.Account.Type == "Organization" && (i.Permissions["members"] == "read" || i.Permissions["members"] == "write") {
+			var err error
+			orgAdmin, err = s.organizationAdmin(ctx, v, i.Account)
+			if err != nil {
+				return nil, err
+			}
 		}
 		for _, repo := range repos.Repositories {
 			if repo.ID > 0 && repo.Permissions["admin"] {
@@ -434,6 +439,12 @@ func (s *Server) dashboard(w http.ResponseWriter, r *http.Request) {
 	for i := range p.Choices {
 		p.Choices[i].EnrollmentNotice = organizationConstraint(s.enrollments, v.User, p.Choices[i])
 		for _, entry := range s.enrollments {
+			if p.Choices[i].OrganizationAdmin {
+				current := canonicalOrganization(s.enrollments, p.Choices[i].Installation.Account.ID)
+				if current != nil && entry.ID != current.ID {
+					continue
+				}
+			}
 			if (entry.User.ID == v.User.ID || p.Choices[i].OrganizationAdmin && entry.Account.ID == p.Choices[i].Installation.Account.ID) && entry.InstallationID == p.Choices[i].Installation.ID && (entry.Repository.ID == p.Choices[i].Repository.ID || p.Choices[i].OrganizationAdmin && entry.Account.ID == p.Choices[i].Installation.Account.ID) {
 				p.Choices[i].SelectedQueues = append([]string(nil), entry.Queues...)
 				if len(p.Choices[i].SelectedQueues) == 0 {
@@ -441,6 +452,7 @@ func (s *Server) dashboard(w http.ResponseWriter, r *http.Request) {
 				}
 				p.Choices[i].WorkflowPath = entry.WorkflowPath
 				p.Choices[i].EnabledWorkflowAccess = entry.EnabledWorkflowAccess
+				p.Choices[i].EnabledWorkflowPath = entry.EnabledWorkflowPath
 				p.Choices[i].OrganizationAccess = entry.OrganizationAccess
 				p.Choices[i].LegacyRepository = entry.Repository
 				break
@@ -497,7 +509,7 @@ func (s *Server) postSession(w http.ResponseWriter, r *http.Request) (string, se
 		http.Error(w, "Sign in again", 401)
 		return "", v, false
 	}
-	r.Body = http.MaxBytesReader(w, r.Body, 4096)
+	r.Body = http.MaxBytesReader(w, r.Body, postBodyLimit(r.URL.Path))
 	if r.ParseForm() != nil || subtle.ConstantTimeCompare([]byte(r.FormValue("csrf")), []byte(v.CSRF)) != 1 || r.Header.Get("Origin") != s.cfg.PublicURL {
 		http.Error(w, "Invalid request", 403)
 		return "", v, false
@@ -601,10 +613,14 @@ func (s *Server) enroll(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	s.mu.Lock()
-	constraint := organizationConstraint(s.enrollments, v.User, *choice)
+	constraint := organizationRequestConstraint(s.enrollments, v.User, *choice, access)
 	s.mu.Unlock()
 	if constraint != "" {
-		http.Error(w, constraint, http.StatusConflict)
+		status := http.StatusConflict
+		if constraint == organizationOwnerSetupMessage {
+			status = http.StatusForbidden
+		}
+		http.Error(w, constraint, status)
 		return
 	}
 	workflowPath := strings.TrimSpace(r.FormValue("workflow_path"))
@@ -628,12 +644,26 @@ func (s *Server) enroll(w http.ResponseWriter, r *http.Request) {
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	if constraint := organizationConstraint(s.enrollments, v.User, *choice); constraint != "" {
-		http.Error(w, constraint, http.StatusConflict)
+	if constraint := organizationRequestConstraint(s.enrollments, v.User, *choice, access); constraint != "" {
+		status := http.StatusConflict
+		if constraint == organizationOwnerSetupMessage {
+			status = http.StatusForbidden
+		}
+		http.Error(w, constraint, status)
 		return
 	}
 	for i, entry := range s.enrollments {
+		if access != nil {
+			current := canonicalOrganization(s.enrollments, choice.Installation.Account.ID)
+			if current != nil && current.ID != entry.ID {
+				continue
+			}
+		}
 		if entry.InstallationID == iid && (entry.Repository.ID == rid || access != nil && entry.Account.ID == choice.Installation.Account.ID) && (entry.User.ID == v.User.ID || access != nil && choice.OrganizationAdmin) {
+			if access != nil && len(access.Workflows) == 0 && entry.OrganizationAccess == nil && entry.EnabledWorkflowAccess != "repository" && entry.WorkflowPath == "" && entry.EnabledWorkflowPath == "" && r.FormValue("confirm_all_workflows") != "1" {
+				http.Error(w, "Existing workflow access is unknown. Enter allowed workflow references or explicitly confirm all workflows.", 400)
+				return
+			}
 			entries := append([]Enrollment(nil), s.enrollments...)
 			entries[i].Authenticated = true
 			if entry.OrganizationAccess != nil && (access == nil || !choice.OrganizationAdmin) {
@@ -655,6 +685,9 @@ func (s *Server) enroll(w http.ResponseWriter, r *http.Request) {
 			entries[i].Updated = time.Now().UTC()
 			if s.cfg.AutomaticActivation && entries[i].Status == "pending" {
 				entries[i].Status = "approved"
+			}
+			if access != nil {
+				entries = replaceOrganizationEnrollment(entries, entries[i])
 			}
 			if e = s.saveLocked(entries); e != nil {
 				http.Error(w, "Request could not be saved", 500)
@@ -728,4 +761,13 @@ func (s *Server) logout(w http.ResponseWriter, r *http.Request) {
 	s.mu.Unlock()
 	s.cookie(w, "chickadee-session", "", -1)
 	http.Redirect(w, r, "/", 303)
+}
+
+// Organization enrollment has bounded repository IDs and workflow refs. URL
+// encoding those validated fields needs more room than the small manage forms.
+func postBodyLimit(path string) int64 {
+	if path == "/enroll" {
+		return 32 << 10
+	}
+	return 4096
 }

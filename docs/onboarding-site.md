@@ -230,14 +230,16 @@ Deploy these settings together and verify the real signup-to-enabled flow before
 claiming automatic activation is live. Standalone Chickadee needs neither policy
 nor Roost.
 
-The current organization bridge supports one selected repository and one account
+Legacy organization enrollments support one selected repository and one account
 managing its runner pool per organization. The dashboard edits that established
 scope; it does not offer a second repository as another independent pool. A
 conflicting signup returns an actionable conflict without naming another user
-or repository. Changing the repository or manager requires operator
-reconciliation; disconnecting a request does not silently replace the owned
-GitHub runner group. Personal repositories remain independent. Existing failed
-second requests do not replace the established pool's status or usage.
+or repository. Changing legacy installation identity requires operator
+reconciliation; verified owners can migrate the repository and manager through
+the v1 controls below. Disconnecting a request does not silently replace the owned
+GitHub runner group. Personal repositories remain independent. Explicit owner
+edits consolidate failed same-installation requests into the established record.
+Existing failed second requests do not replace the established pool's status or usage.
 
 ## Organization repository and workflow access (v1)
 
@@ -263,8 +265,8 @@ and `applied_organization_access` (confirmed), with `repository_selection` (`all
 or `selected`), `repository_ids` (required for selected; empty for all), and
 `workflows` (optional exact refs). Field absence means the legacy policy, never
 all repositories. The site supports at most 100 repositories per installation,
-100 selected IDs, and 50 workflow references, within existing request/store body
-limits. An all-repository App installation is required for all-repository access.
+100 selected IDs, and 50 workflow references, within the 32 KiB enrollment request and existing store body
+limits. Other forms retain their 4 KiB limit. An all-repository App installation is required for all-repository access.
 
 The admission policy may supply `profile_catalog`, a full map of queue labels to
 existing image/resource/max/warm profile templates. This catalog is separate from
@@ -301,3 +303,19 @@ acceptance separately verifies all-repository jobs on at least two repositories,
 selected-repository exclusion, workflow allow/deny behavior, optional queue
 initialization, and preservation of running jobs. Source checks do not prove
 that App permissions, live runner groups, or deployment settings have changed.
+
+When organization owner verification is explicitly revoked (including loss of
+Members permission), reconciliation disables new assignments before reporting
+permission-required or a requested stopped state. It retains the disabled scope's
+installation/group identity and limits for verified recovery. A missing profile
+catalog cannot block pause, disconnection, or revocation. Actual installation or
+runner-permission revocation additionally follows the existing controlled
+quarantine path; an installation-ID change still requires operator recovery.
+Transient membership lookup failures are shown as verification unavailable.
+
+Legacy migration initializes workflow controls from a known requested or applied
+main-branch workflow path. If neither is stored and unrestricted access was not
+previously confirmed, an owner must enter allowed workflow references or explicitly
+confirm unrestricted workflows; changing queues alone cannot silently broaden
+unknown legacy workflow restrictions. Cached explicit primary requests match the
+configured primary identity and continue revocation checks during site outages.

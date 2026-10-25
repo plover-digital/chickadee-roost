@@ -191,7 +191,7 @@ def main():
     if installation['permissions'].get(needed)!='write':raise ValueError('runner-management permission not approved')
     permissions={needed:'write','metadata':'read'}
     if request.get('organization_access') is not None:
-        if installation['permissions'].get('members')!='read':raise ValueError('organization access requires Members read permission')
+        if installation['permissions'].get('members') not in ('read','write'):raise ValueError('organization access requires Members read permission')
         permissions['members']='read'
     token=setup.api('/app/installations/'+str(iid)+'/access_tokens','POST',jwt,{'permissions':permissions})['token']
     repo=None;repositories=[]

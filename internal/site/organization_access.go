@@ -46,17 +46,34 @@ func validOrganizationAccess(a *OrganizationAccess) bool {
 	}
 	return true
 }
-func (s *Server) organizationAdmin(ctx context.Context, v session, account Account) bool {
+
+type githubStatusError int
+
+func (e githubStatusError) Error() string { return "GitHub authorization unavailable" }
+
+var organizationLogin = regexp.MustCompile(`^[A-Za-z0-9-]{1,39}$`)
+
+func (s *Server) organizationAdmin(ctx context.Context, v session, account Account) (bool, error) {
 	var membership struct {
 		State, Role  string
 		Organization Account
 		User         User
 	}
-	if !regexp.MustCompile(`^[A-Za-z0-9-]{1,39}$`).MatchString(account.Login) {
-		return false
+	if !organizationLogin.MatchString(account.Login) {
+		return false, errors.New("Invalid organization identity")
 	}
 	err := s.fetch(ctx, "/user/memberships/orgs/"+account.Login, v.Token, &membership)
-	return err == nil && membership.State == "active" && membership.Role == "admin" && membership.Organization.ID == account.ID && membership.User.ID == v.User.ID
+	if err != nil {
+		var status githubStatusError
+		if errors.As(err, &status) && (status == 403 || status == 404) {
+			return false, nil
+		}
+		return false, err
+	}
+	if membership.Organization.ID != account.ID || membership.User.ID != v.User.ID {
+		return false, errors.New("GitHub organization identity could not be verified")
+	}
+	return membership.State == "active" && membership.Role == "admin", nil
 }
 func (c Choice) authorizes(e Enrollment) bool {
 	return c.Installation.ID == e.InstallationID && (e.OrganizationAccess == nil && c.Repository.ID == e.Repository.ID || e.OrganizationAccess != nil && c.Installation.Account.ID == e.Account.ID && c.OrganizationAdmin)
@@ -140,12 +157,16 @@ func (c Choice) WorkflowReferences() string {
 	if c.OrganizationAccess != nil {
 		return strings.Join(c.OrganizationAccess.Workflows, "\n")
 	}
-	if c.WorkflowPath != "" && c.EnabledWorkflowAccess != "repository" {
+	path := c.WorkflowPath
+	if path == "" {
+		path = c.EnabledWorkflowPath
+	}
+	if path != "" && c.EnabledWorkflowAccess != "repository" {
 		repo := c.Repository
 		if c.LegacyRepository.ID > 0 {
 			repo = c.LegacyRepository
 		}
-		return fmt.Sprintf("%s/%s@refs/heads/main", repo.Name, c.WorkflowPath)
+		return fmt.Sprintf("%s/%s@refs/heads/main", repo.Name, path)
 	}
 	return ""
 }
@@ -163,4 +184,8 @@ func organizationOwner(choices []Choice, e Enrollment) bool {
 		}
 	}
 	return false
+}
+
+func (c Choice) LegacyWorkflowPolicyUnknown() bool {
+	return c.OrganizationAccess == nil && len(c.SelectedQueues) > 0 && c.EnabledWorkflowAccess != "repository" && c.WorkflowPath == "" && c.EnabledWorkflowPath == ""
 }

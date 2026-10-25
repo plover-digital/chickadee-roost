@@ -30,8 +30,9 @@ func TestWorkflowPathsAndServerBuiltMainRef(t *testing.T) {
 		t.Fatal("applied workflow still pending")
 	}
 }
-func TestOrganizationEnrollmentRequiresExactWorkflowAndPendingNotProcessing(t *testing.T) {
+func TestLegacyOrganizationEnrollmentRequiresExactWorkflowAndPendingNotProcessing(t *testing.T) {
 	s := fixture(t)
+	s.enrollments = []Enrollment{{ID: "legacy", User: User{7, "tester"}, Account: Account{10, "example", "Organization"}, InstallationID: 8, Repository: Repository{ID: 99, Name: "example/repo"}, Status: "pending", Queues: []string{"chickadee"}}}
 	s.sessions["session"] = session{User: User{7, "tester"}, Token: "fixture", CSRF: "csrf", Expires: time.Now().Add(time.Hour)}
 	s.http.Transport = transport(func(r *http.Request) (*http.Response, error) {
 		if strings.HasPrefix(r.URL.Path, "/user/installations/") {
