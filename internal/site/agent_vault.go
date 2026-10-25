@@ -32,11 +32,12 @@ type agentToken struct {
 	Expires       time.Time `json:"expires_at"`
 }
 type agentGrant struct {
-	User           User      `json:"user"`
-	Token          string    `json:"access_token"`
-	RefreshToken   string    `json:"refresh_token"`
-	Expires        time.Time `json:"expires_at"`
-	RefreshExpires time.Time `json:"refresh_expires_at"`
+	User            User      `json:"user"`
+	Token           string    `json:"access_token"`
+	RefreshToken    string    `json:"refresh_token"`
+	Expires         time.Time `json:"expires_at"`
+	RefreshExpires  time.Time `json:"refresh_expires_at"`
+	IdentityPending bool      `json:"identity_pending,omitempty"`
 }
 type agentState struct {
 	Version int                   `json:"version"`
@@ -191,7 +192,7 @@ func (v *agentVault) create(sid string, user session, name, scope string, reposi
 	token := agentToken{ID: random(), GrantID: grantID, UserID: user.User.ID, Name: name, Scope: scope, RepositoryIDs: repositories, Created: now, Expires: now.Add(lifetime)}
 	_, existed := v.state.Grants[grantID]
 	if !existed {
-		v.state.Grants[grantID] = agentGrant{user.User, user.Token, user.RefreshToken, user.GitHubExpires, user.RefreshExpires}
+		v.state.Grants[grantID] = agentGrant{User: user.User, Token: user.Token, RefreshToken: user.RefreshToken, Expires: user.GitHubExpires, RefreshExpires: user.RefreshExpires}
 	}
 	v.state.Tokens[agentDigest(raw)] = token
 	v.dirty = true
@@ -236,7 +237,7 @@ func (s *Server) authorizeAgent(r *http.Request, raw string) (agentToken, sessio
 	if !ok || grant.Token == "" || !time.Now().Before(grant.RefreshExpires) {
 		return token, session{}, 401, "Sign in with GitHub again and create a replacement token"
 	}
-	if !time.Now().Add(time.Minute).Before(grant.Expires) {
+	if !time.Now().Before(grant.Expires) || !grant.IdentityPending && !time.Now().Add(time.Minute).Before(grant.Expires) {
 		data := url.Values{"client_id": {s.cfg.ClientID}, "client_secret": {s.cfg.ClientSecret}, "grant_type": {"refresh_token"}, "refresh_token": {grant.RefreshToken}}
 		req, err := http.NewRequestWithContext(r.Context(), "POST", s.oauth+"/login/oauth/access_token", strings.NewReader(data.Encode()))
 		if err != nil {
@@ -274,20 +275,37 @@ func (s *Server) authorizeAgent(r *http.Request, raw string) (agentToken, sessio
 		grant.RefreshToken = refreshed.RefreshToken
 		grant.Expires = time.Now().Add(time.Duration(refreshed.ExpiresIn) * time.Second)
 		grant.RefreshExpires = time.Now().Add(time.Duration(refreshed.RefreshExpiresIn) * time.Second)
-		// Verify numeric identity after every access-token exchange.
-		var user User
-		if s.fetch(r.Context(), "/user", grant.Token, &user) != nil || user.ID != grant.User.ID {
-			grant.Token = ""
-			grant.RefreshToken = ""
-			vault.state.Grants[token.GrantID] = grant
-			vault.dirty = true
-			_ = vault.saveLocked()
-			return token, session{}, 401, "GitHub identity could not be verified; reconnect agent access"
-		}
+		// Rotation consumes the previous refresh token. Save the replacement
+		// before querying identity, so cancellation or a transient GitHub failure
+		// can retry verification without losing the grant or replaying refresh.
+		grant.IdentityPending = true
 		vault.state.Grants[token.GrantID] = grant
 		vault.dirty = true
 	}
 	if vault.dirty {
+		if err := vault.saveLocked(); err != nil {
+			return token, session{}, 503, "Agent credentials could not be saved; retry later"
+		}
+	}
+	if grant.IdentityPending {
+		var user User
+		if s.fetch(r.Context(), "/user", grant.Token, &user) != nil || user.ID <= 0 || user.Login == "" {
+			return token, session{}, 502, "GitHub identity verification unavailable; retry later"
+		}
+		if user.ID != grant.User.ID {
+			grant.Token = ""
+			grant.RefreshToken = ""
+			grant.IdentityPending = false
+			vault.state.Grants[token.GrantID] = grant
+			vault.dirty = true
+			if err := vault.saveLocked(); err != nil {
+				return token, session{}, 503, "Agent credentials could not be saved; retry later"
+			}
+			return token, session{}, 401, "GitHub identity could not be verified; reconnect agent access"
+		}
+		grant.IdentityPending = false
+		vault.state.Grants[token.GrantID] = grant
+		vault.dirty = true
 		if err := vault.saveLocked(); err != nil {
 			return token, session{}, 503, "Agent credentials could not be saved; retry later"
 		}

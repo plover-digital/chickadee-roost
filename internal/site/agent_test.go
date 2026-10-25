@@ -2,6 +2,7 @@ package site
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
@@ -492,5 +493,93 @@ func TestAgentSharedGrantConcurrentRefresh(t *testing.T) {
 	}
 	if agentCall(s, first, "GET", "/api/v1/me", "").Code != 401 || agentCall(s, second, "GET", "/api/v1/me", "").Code != 200 {
 		t.Fatal("individual revocation removed sibling grant or failed")
+	}
+}
+
+func TestAgentRefreshRetriesTransientIdentityAfterRestart(t *testing.T) {
+	for _, failure := range []string{"unavailable", "rate-limited", "canceled", "timeout", "missing-identity"} {
+		t.Run(failure, func(t *testing.T) {
+			s, token := agentFixture(t)
+			credential := s.agentVault.state.Tokens[agentDigest(token)]
+			grant := s.agentVault.state.Grants[credential.GrantID]
+			grant.Expires = time.Now().Add(-time.Minute)
+			s.agentVault.state.Grants[credential.GrantID] = grant
+			refreshes, identities := 0, 0
+			github := transport(func(r *http.Request) (*http.Response, error) {
+				if r.URL.Host == "github.com" {
+					refreshes++
+					return response(`{"access_token":"ghu_rotated","refresh_token":"ghr_rotated","expires_in":28800,"refresh_token_expires_in":15897600}`), nil
+				}
+				identities++
+				if identities == 1 {
+					switch failure {
+					case "missing-identity":
+						return response(`{"id":0}`), nil
+					case "canceled":
+						return nil, context.Canceled
+					case "timeout":
+						return nil, context.DeadlineExceeded
+					default:
+						res := response(`{"message":"temporary outage"}`)
+						res.StatusCode = 503
+						if failure == "rate-limited" {
+							res.StatusCode = 429
+						}
+						return res, nil
+					}
+				}
+				return response(`{"id":7,"login":"tester"}`), nil
+			})
+			s.http.Transport = github
+			if got := agentCall(s, token, "GET", "/api/v1/me", ""); got.Code != 502 {
+				t.Fatalf("identity outage must be retryable, got %d", got.Code)
+			}
+			restarted, err := New(s.cfg)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if !restarted.agentVault.state.Grants[credential.GrantID].IdentityPending {
+				t.Fatal("restart lost identity verification gate")
+			}
+			restarted.http.Transport = github
+			if got := agentCall(restarted, token, "GET", "/api/v1/me", ""); got.Code != 200 {
+				t.Fatalf("verification retry failed: %d", got.Code)
+			}
+			if refreshes != 1 || identities != 2 {
+				t.Fatalf("rotated refresh replayed or identity not retried: refresh=%d identity=%d", refreshes, identities)
+			}
+			if restarted.agentVault.state.Grants[credential.GrantID].IdentityPending {
+				t.Fatal("verified identity remained pending")
+			}
+		})
+	}
+}
+
+func TestAgentPendingIdentityCanRefreshExpiredAccess(t *testing.T) {
+	s, token := agentFixture(t)
+	credential := s.agentVault.state.Tokens[agentDigest(token)]
+	grant := s.agentVault.state.Grants[credential.GrantID]
+	grant.Expires = time.Now().Add(-time.Minute)
+	grant.IdentityPending = true
+	grant.Token = "ghu_rotated"
+	grant.RefreshToken = "ghr_rotated"
+	s.agentVault.state.Grants[credential.GrantID] = grant
+	refreshes := 0
+	s.http.Transport = transport(func(r *http.Request) (*http.Response, error) {
+		if r.URL.Host == "github.com" {
+			refreshes++
+			_ = r.ParseForm()
+			if r.FormValue("refresh_token") != "ghr_rotated" {
+				t.Fatal("replayed old refresh token")
+			}
+			return response(`{"access_token":"ghu_verified","refresh_token":"ghr_verified","expires_in":28800,"refresh_token_expires_in":15897600}`), nil
+		}
+		if r.Header.Get("Authorization") != "Bearer ghu_verified" {
+			return &http.Response{StatusCode: 401, Header: make(http.Header), Body: http.NoBody}, nil
+		}
+		return response(`{"id":7,"login":"tester"}`), nil
+	})
+	if got := agentCall(s, token, "GET", "/api/v1/me", ""); got.Code != 200 || refreshes != 1 {
+		t.Fatalf("pending identity stranded after token expiry: status=%d refreshes=%d", got.Code, refreshes)
 	}
 }

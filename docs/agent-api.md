@@ -54,8 +54,11 @@ When enabled, OAuth callbacks retain the GitHub refresh grant in the expiring
 memory session, and persist it only when the human explicitly creates an agent
 token. Creating tokens from the same sign-in shares one underlying grant.
 The server refreshes expiring GitHub access tokens, verifies numeric user identity
-following the exchange, and persists the rotated credentials before authorizing
-an API request. A failed save does not replay the consumed refresh token. The
+following the exchange, and persists the rotated credentials with identity
+verification pending before querying GitHub. Transient identity failures return a
+retryable error; verification remains required after a restart. Only a confirmed
+matching identity clears that gate. A failed save does not replay the consumed
+refresh token. The
 credential-store mutex is separate from the website session mutex. Revoking the
 last token for a grant removes its stored GitHub credentials. Expired metadata
 is pruned during access and store updates; the next successful update persists
