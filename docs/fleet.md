@@ -194,8 +194,13 @@ enrollment schema change.
 A delivered runner can remain connected without receiving a job. It still counts
 against its scope's concurrency quota; `RUNNING` means listener launch rather
 than confirmed GitHub job execution. The broker now attempts ordinary GitHub
-runner deregistration after a two-minute reservation grace, at most once every
-30 seconds per execution, with a five-second request deadline. It verifies the
+runner deregistration after two minutes following acknowledged credential
+delivery. Recovery grants a fresh two-minute grace after authenticated worker
+observation, so slow provisioning cannot consume the listener grace. Requests
+run in the background with at most two in flight, one per execution, and at
+least 30 seconds between attempts. Each uses an independent API client and a
+five-second deadline, so the pinned SDK's shared mutex cannot block scheduling.
+The broker cancels and joins those requests before releasing its state lock. It verifies the
 runner name, positive runner ID and exact scale-set ownership before deletion.
 
 The GitHub service refuses ordinary deletion while a job is assigned/running.
@@ -222,3 +227,19 @@ identity fencing, API failures, restart and quota retention. Live acceptance of
 idle exit and job-start races is still required before production rollout.
 Standalone controller idle draining remains tracked separately in
 [Chickadee issue 26](https://github.com/plover-digital/chickadee/issues/26).
+
+### Queue admission fairness and quota reloads
+
+Admission rotates across scopes and across queues within each scope. A
+continuous backlog on one label cannot always take a shared slot before another
+eligible label. Every admission still requires the existing scope/global/worker
+budgets and durable intent; skipping a full, incompatible or zero-demand queue
+does not advance the cursors. Cursors are in memory and reset on broker restart;
+repeated restarts can bias ordering. This is admission fairness, not binding a VM
+to a particular GitHub job or overriding GitHub workflow/repository policy.
+
+A scope quota change updates both current demand and the existing poller's
+policy even when the per-label advertised maximum is unchanged. Queue-only
+reload preserves the listener session and already allocated jobs. Lowering a
+quota never releases existing executions early; admission waits until their
+normal cleanup brings the scope under its new limit.

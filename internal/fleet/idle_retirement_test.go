@@ -6,19 +6,20 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"sync/atomic"
 	"testing"
 	"time"
 )
 
 type idleBackend struct {
 	fakeBackend
-	retireCalls  int
+	retireCalls  atomic.Int32
 	retireErr    error
 	beforeRetire func(context.Context, string)
 }
 
 func (b *idleBackend) RetireIdle(ctx context.Context, name string) error {
-	b.retireCalls++
+	b.retireCalls.Add(1)
 	if b.beforeRetire != nil {
 		b.beforeRetire(ctx, name)
 	}
@@ -37,14 +38,16 @@ func TestOverdueIdleRunnerRetainsQuotaUntilWorkerCleanup(t *testing.T) {
 		t.Fatal(err)
 	}
 	old := b.assignments[0]
-	b.assignments[0].ReservedAt = time.Now().Add(-3 * time.Minute)
+	b.assignments[0].ReservedAt = time.Now()
+	b.idleSince[b.assignments[0].ID] = time.Now().Add(-3 * time.Minute)
 	d.Assigned = 0
 	d.Revision++
 	if err := b.Sync(context.Background(), []Demand{d, other}, workers, backends); err != nil {
 		t.Fatal(err)
 	}
-	if backend.retireCalls != 1 {
-		t.Fatalf("overdue runner was not deregistered: calls=%d", backend.retireCalls)
+	waitIdleChecks(t, b)
+	if backend.retireCalls.Load() != 1 {
+		t.Fatalf("overdue runner was not deregistered: calls=%d", backend.retireCalls.Load())
 	}
 	if w.reserve != 1 || !b.scopeBusy(d.ScopeURL) {
 		t.Fatal("deregistration released quota before process/disk cleanup")
@@ -55,7 +58,8 @@ func TestOverdueIdleRunnerRetainsQuotaUntilWorkerCleanup(t *testing.T) {
 	if err := b.Sync(context.Background(), []Demand{d, other}, workers, backends); err != nil {
 		t.Fatal(err)
 	}
-	if backend.retireCalls != 1 {
+	waitIdleChecks(t, b)
+	if backend.retireCalls.Load() != 1 {
 		t.Fatal("unbounded deregistration retries")
 	}
 	r := w.records[old.ID]
@@ -83,7 +87,8 @@ func TestIdleRetirementRetainsQuotaAndRetryThrottleAcrossRestart(t *testing.T) {
 			if err := b.Sync(context.Background(), []Demand{d}, workers, backends); err != nil {
 				t.Fatal(err)
 			}
-			b.assignments[0].ReservedAt = time.Now().Add(-3 * time.Minute)
+			b.assignments[0].ReservedAt = time.Now()
+			b.idleSince[b.assignments[0].ID] = time.Now().Add(-3 * time.Minute)
 			backend.beforeRetire = func(ctx context.Context, name string) {
 				if name != b.assignments[0].RunnerName {
 					t.Fatal("wrong runner retired")
@@ -104,7 +109,8 @@ func TestIdleRetirementRetainsQuotaAndRetryThrottleAcrossRestart(t *testing.T) {
 			if err := b.Sync(context.Background(), []Demand{d}, workers, backends); err != nil {
 				t.Fatal(err)
 			}
-			if backend.retireCalls != 1 || w.reserve != 1 || w.deliver != 1 || backend.jit != 1 {
+			waitIdleChecks(t, b)
+			if backend.retireCalls.Load() != 1 || w.reserve != 1 || w.deliver != 1 || backend.jit != 1 {
 				t.Fatal("retirement failure replayed or replaced execution")
 			}
 			checked := b.assignments[0].RegistrationCheckedAt
@@ -125,15 +131,18 @@ func TestIdleRetirementRetainsQuotaAndRetryThrottleAcrossRestart(t *testing.T) {
 			if err := recovered.Sync(context.Background(), []Demand{d}, workers, backends); err != nil {
 				t.Fatal(err)
 			}
-			if backend.retireCalls != 1 || w.reserve != 1 || w.deliver != 1 || !recovered.scopeBusy(d.ScopeURL) {
+			waitIdleChecks(t, recovered)
+			if backend.retireCalls.Load() != 1 || w.reserve != 1 || w.deliver != 1 || !recovered.scopeBusy(d.ScopeURL) {
 				t.Fatal("restart retried early or released uncertain execution")
 			}
 			recovered.assignments[0].RegistrationCheckedAt = time.Now().Add(-time.Minute)
+			recovered.idleSince[recovered.assignments[0].ID] = time.Now().Add(-3 * time.Minute)
 			backend.retireErr = nil
 			if err := recovered.Sync(context.Background(), []Demand{d}, workers, backends); err != nil {
 				t.Fatal(err)
 			}
-			if backend.retireCalls != 2 || w.reserve != 1 {
+			waitIdleChecks(t, recovered)
+			if backend.retireCalls.Load() != 2 || w.reserve != 1 {
 				t.Fatal("retirement did not retry safely")
 			}
 		})
@@ -150,10 +159,12 @@ func TestIdleRetirementSkipsFreshUndeliveredUncertainAndUnreachableExecutions(t 
 			if err := b.Sync(context.Background(), []Demand{d}, workers, backends); err != nil {
 				t.Fatal(err)
 			}
-			b.assignments[0].ReservedAt = time.Now().Add(-3 * time.Minute)
+			b.assignments[0].ReservedAt = time.Now()
+			b.idleSince[b.assignments[0].ID] = time.Now().Add(-3 * time.Minute)
 			switch state {
 			case "fresh":
 				b.assignments[0].ReservedAt = time.Now()
+				b.idleSince[b.assignments[0].ID] = time.Now()
 			case "worker-offline":
 				w.unavailable = true
 			case "worker-generation-changed":
@@ -171,7 +182,8 @@ func TestIdleRetirementSkipsFreshUndeliveredUncertainAndUnreachableExecutions(t 
 			d.Assigned = 0
 			d.Revision++
 			_ = b.Sync(context.Background(), []Demand{d}, workers, backends)
-			if backend.retireCalls != 0 || w.deliver != 1 || backend.jit != 1 {
+			waitIdleChecks(t, b)
+			if backend.retireCalls.Load() != 0 || w.deliver != 1 || backend.jit != 1 {
 				t.Fatal("unsafe execution was retired or credentials replayed")
 			}
 		})
@@ -184,7 +196,8 @@ func TestIdleRetirementDoesNotCallGitHubWhenAttemptCannotBePersisted(t *testing.
 	if err := b.Sync(context.Background(), []Demand{d}, map[string]Worker{"worker-a": w}, map[string]Backend{d.QueueID: backend}); err != nil {
 		t.Fatal(err)
 	}
-	b.assignments[0].ReservedAt = time.Now().Add(-3 * time.Minute)
+	b.assignments[0].ReservedAt = time.Now()
+	b.idleSince[b.assignments[0].ID] = time.Now().Add(-3 * time.Minute)
 	// Move the directory away so fsync/rename cannot establish the attempt.
 	original := b.dir
 	if err := os.Rename(original, original+"-unavailable"); err != nil {
@@ -194,7 +207,133 @@ func TestIdleRetirementDoesNotCallGitHubWhenAttemptCannotBePersisted(t *testing.
 	if err := b.retireIdle(context.Background(), 0, backend, time.Now()); err == nil {
 		t.Fatal("unpersisted retirement accepted")
 	}
-	if backend.retireCalls != 0 || w.reserve != 1 || w.deliver != 1 {
+	waitIdleChecks(t, b)
+	if backend.retireCalls.Load() != 0 || w.reserve != 1 || w.deliver != 1 {
 		t.Fatal("GitHub called or credentials replayed after persistence failure")
 	}
+}
+
+func waitIdleChecks(t *testing.T, b *Broker) {
+	t.Helper()
+	for _, check := range b.idleChecks {
+		select {
+		case <-check.done:
+		case <-time.After(2 * time.Second):
+			t.Fatal("idle request did not finish")
+		}
+	}
+}
+
+func TestIdleGraceStartsAfterDeliveryAndAfterRecovery(t *testing.T) {
+	b, w, _, d := fixture(t)
+	backend := &idleBackend{}
+	workers := map[string]Worker{"worker-a": w}
+	backends := map[string]Backend{d.QueueID: backend}
+	if err := b.Sync(context.Background(), []Demand{d}, workers, backends); err != nil {
+		t.Fatal(err)
+	}
+	// Boot/seal/JIT may consume the entire reservation grace before ACK. An old
+	// reservation must not make the newly delivered runner eligible immediately.
+	b.assignments[0].ReservedAt = time.Now().Add(-10 * time.Minute)
+	if err := b.Sync(context.Background(), []Demand{d}, workers, backends); err != nil {
+		t.Fatal(err)
+	}
+	waitIdleChecks(t, b)
+	if backend.retireCalls.Load() != 0 {
+		t.Fatal("slow provisioning consumed listener grace")
+	}
+	dir, limits := b.dir, b.limits
+	if err := b.persist(); err != nil {
+		t.Fatal(err)
+	}
+	b.Close()
+	recovered, err := Open(dir, "roost", limits)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer recovered.Close()
+	if err := recovered.Sync(context.Background(), []Demand{d}, workers, backends); err != nil {
+		t.Fatal(err)
+	}
+	waitIdleChecks(t, recovered)
+	if backend.retireCalls.Load() != 0 || recovered.idleSince[b.assignments[0].ID].IsZero() {
+		t.Fatal("recovery failed to grant fresh observation grace")
+	}
+	recovered.idleSince[b.assignments[0].ID] = time.Now().Add(-3 * time.Minute)
+	if err := recovered.Sync(context.Background(), []Demand{d}, workers, backends); err != nil {
+		t.Fatal(err)
+	}
+	waitIdleChecks(t, recovered)
+	if backend.retireCalls.Load() != 1 {
+		t.Fatal("eligible recovered runner never checked")
+	}
+}
+
+func TestBlockedIdleChecksDoNotBlockOtherScopesAndAreBounded(t *testing.T) {
+	b, w, _, d := fixture(t)
+	backend := &idleBackend{}
+	started := make(chan struct{}, 8)
+	backend.beforeRetire = func(ctx context.Context, _ string) { started <- struct{}{}; <-ctx.Done() }
+	workers := map[string]Worker{"worker-a": w}
+	backends := map[string]Backend{d.QueueID: backend}
+	d.ScopeMax = 2
+	d.Assigned = 2
+	for i := 0; i < 2; i++ {
+		if err := b.Sync(context.Background(), []Demand{d}, workers, backends); err != nil {
+			t.Fatal(err)
+		}
+	}
+	for _, a := range b.assignments {
+		b.idleSince[a.ID] = time.Now().Add(-3 * time.Minute)
+	}
+	other := d
+	other.QueueID = "another|queue"
+	other.ScopeURL = "https://github.com/another"
+	other.ScopeMax = 1
+	other.Assigned = 1
+	backends[other.QueueID] = backend
+	done := make(chan error, 1)
+	go func() { done <- b.Sync(context.Background(), []Demand{d, other}, workers, backends) }()
+	select {
+	case err := <-done:
+		if err != nil {
+			t.Fatal(err)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("blocked retirement stalled fleet admission")
+	}
+	if w.reserve != 3 {
+		t.Fatal("unrelated scope could not use free capacity")
+	}
+	for i := 0; i < 2; i++ {
+		select {
+		case <-started:
+		case <-time.After(time.Second):
+			t.Fatal("background checks did not start")
+		}
+	}
+	// A third overdue allocation cannot start another request, even if previous
+	// attempts have aged past the retry interval while their calls remain blocked.
+	for i, a := range b.assignments {
+		b.idleSince[a.ID] = time.Now().Add(-3 * time.Minute)
+		b.assignments[i].RegistrationCheckedAt = time.Now().Add(-time.Minute)
+	}
+	if err := b.Sync(context.Background(), []Demand{d, other}, workers, backends); err != nil {
+		t.Fatal(err)
+	}
+	if len(b.idleChecks) != maxIdleChecks || backend.retireCalls.Load() != 2 {
+		t.Fatal("background request bound or per-assignment fencing lost")
+	}
+	// Close must cancel/join background work before the state lock can be reused.
+	closed := make(chan error, 1)
+	go func() { closed <- b.Close() }()
+	select {
+	case err := <-closed:
+		if err != nil {
+			t.Fatal(err)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("broker close did not cancel background checks")
+	}
+	waitIdleChecks(t, b)
 }

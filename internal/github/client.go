@@ -14,11 +14,12 @@ import (
 )
 
 type Client struct {
-	API       *scaleset.Client
-	SetID     int
-	GroupID   int
-	SetName   string
-	NativeMac bool
+	API              *scaleset.Client
+	SetID            int
+	GroupID          int
+	SetName          string
+	NativeMac        bool
+	newRetirementAPI func() (runnerRemovalAPI, error)
 }
 
 // Actions cache archives paths relative to GITHUB_WORKSPACE. Match the hosted
@@ -96,11 +97,17 @@ func initialize(c dispatch.Queue) (*Client, error) {
 		return nil, e
 	}
 	// Do not replay non-idempotent JIT creation after an ambiguous HTTP failure.
-	api, e := scaleset.NewClientWithGitHubApp(scaleset.ClientWithGitHubAppConfig{GitHubConfigURL: c.GitHubURL, GitHubAppAuth: scaleset.GitHubAppAuth{ClientID: c.ClientID, InstallationID: c.InstallationID, PrivateKey: string(key)}, SystemInfo: scaleset.SystemInfo{System: "chickadee", Version: "prototype"}}, scaleset.WithTimeout(65*time.Second), scaleset.WithRetryMax(0))
+	appConfig := scaleset.ClientWithGitHubAppConfig{GitHubConfigURL: c.GitHubURL, GitHubAppAuth: scaleset.GitHubAppAuth{ClientID: c.ClientID, InstallationID: c.InstallationID, PrivateKey: string(key)}, SystemInfo: scaleset.SystemInfo{System: "chickadee", Version: "prototype"}}
+	api, e := scaleset.NewClientWithGitHubApp(appConfig, scaleset.WithTimeout(65*time.Second), scaleset.WithRetryMax(0))
 	if e != nil {
 		return nil, fmt.Errorf("App client initialization failed")
 	}
-	return &Client{API: api, GroupID: c.RunnerGroupID, SetName: c.ScaleSet, NativeMac: c.Machine == "apple-vz"}, nil
+	return &Client{API: api, GroupID: c.RunnerGroupID, SetName: c.ScaleSet, NativeMac: c.Machine == "apple-vz", newRetirementAPI: func() (runnerRemovalAPI, error) {
+		// The pinned SDK takes a context-unaware mutex around API requests. Use
+		// a fresh client per retirement so session/statistics/JIT calls cannot
+		// hold its mutex beyond the retirement request's deadline.
+		return scaleset.NewClientWithGitHubApp(appConfig, scaleset.WithTimeout(5*time.Second), scaleset.WithRetryMax(0))
+	}}, nil
 }
 
 func (c *Client) JIT(ctx context.Context, name string) (string, error) {
@@ -119,7 +126,14 @@ func (c *Client) JIT(ctx context.Context, name string) (string, error) {
 // refuses removal while a job is assigned/running, including a job-start race.
 // A successful response is not worker process-exit or disk-cleanup proof.
 func (c *Client) RetireIdle(ctx context.Context, name string) error {
-	return removeOwnedRunner(ctx, c.API, c.SetID, name)
+	if c.newRetirementAPI == nil {
+		return fmt.Errorf("retirement client unavailable")
+	}
+	api, err := c.newRetirementAPI()
+	if err != nil {
+		return fmt.Errorf("retirement client unavailable")
+	}
+	return removeOwnedRunner(ctx, api, c.SetID, name)
 }
 
 func (c *Client) Remove(ctx context.Context, name string) error {
