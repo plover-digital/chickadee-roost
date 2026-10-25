@@ -220,6 +220,11 @@ func (b *Broker) Sync(ctx context.Context, demands []Demand, workers map[string]
 			}
 			continue
 		}
+		if a.Phase == Delivered && record.State == "delivery_intent" {
+			if err := b.retireIdle(ctx, i, backends[a.QueueID], time.Now()); err != nil {
+				return err
+			}
+		}
 		switch a.Phase {
 		case Intent:
 			current, eligible := eligibleDemand[a.QueueID]

@@ -114,18 +114,38 @@ func (c *Client) JIT(ctx context.Context, name string) (string, error) {
 	}
 	return j.EncodedJITConfig, nil
 }
+
+// RetireIdle asks GitHub to deregister an owned runner. The service atomically
+// refuses removal while a job is assigned/running, including a job-start race.
+// A successful response is not worker process-exit or disk-cleanup proof.
+func (c *Client) RetireIdle(ctx context.Context, name string) error {
+	return removeOwnedRunner(ctx, c.API, c.SetID, name)
+}
+
 func (c *Client) Remove(ctx context.Context, name string) error {
-	r, e := c.API.GetRunnerByName(ctx, name)
+	return removeOwnedRunner(ctx, c.API, c.SetID, name)
+}
+
+type runnerRemovalAPI interface {
+	GetRunnerByName(context.Context, string) (*scaleset.RunnerReference, error)
+	RemoveRunner(context.Context, int64) error
+}
+
+func removeOwnedRunner(ctx context.Context, api runnerRemovalAPI, setID int, name string) error {
+	r, e := api.GetRunnerByName(ctx, name)
 	if e != nil {
 		return fmt.Errorf("runner lookup failed")
 	}
 	if r == nil {
 		return nil
 	}
-	if c.SetID == 0 || r.RunnerScaleSetID != c.SetID {
+	if setID <= 0 || r.RunnerScaleSetID != setID || r.Name != name || r.ID <= 0 {
 		return fmt.Errorf("runner ownership mismatch")
 	}
-	if e = c.API.RemoveRunner(ctx, int64(r.ID)); e != nil {
+	// Use the ordinary service DELETE, never a force-delete endpoint or a
+	// sampled busy=false decision. Busy refusals and ambiguous responses retain
+	// the execution and its quota; the broker can retry without killing the VM.
+	if e = api.RemoveRunner(ctx, int64(r.ID)); e != nil {
 		return fmt.Errorf("runner removal failed")
 	}
 	return nil

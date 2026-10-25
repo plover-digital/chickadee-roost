@@ -188,3 +188,37 @@ path. Candidate validation then uses `chickadee-roost -catalog ... -fleet ...
 -check`; standalone deployments retain the existing controller validator. Deploy
 this helper/policy before accepting Mac requests. No worker API fields or stored
 enrollment schema change.
+
+## Retiring idle credentialed runners
+
+A delivered runner can remain connected without receiving a job. It still counts
+against its scope's concurrency quota; `RUNNING` means listener launch rather
+than confirmed GitHub job execution. The broker now attempts ordinary GitHub
+runner deregistration after a two-minute reservation grace, at most once every
+30 seconds per execution, with a five-second request deadline. It verifies the
+runner name, positive runner ID and exact scale-set ownership before deletion.
+
+The GitHub service refuses ordinary deletion while a job is assigned/running.
+That server decision handles a job starting between lookup and deletion; a
+sampled `busy=false`, guest message or low CPU usage is never retirement authority.
+This follows the upstream [ARC live-runner removal contract](https://github.com/actions/actions-runner-controller/blob/master/controllers/actions.github.com/ephemeralrunner_controller.go)
+(`removeRunnerOfLivePod`). No force-delete operation or worker termination is
+used. Busy refusals, missing registration, lost replies and GitHub outages leave
+execution ownership and capacity charged. The worker's existing job deadline
+remains the fallback if the listener does not exit after deregistration.
+
+A successful deregistration does not free quota. The runner listener must exit,
+and the authenticated worker must independently confirm process exit and disk
+cleanup. Normal terminal registration reconciliation then releases the slot.
+Credential intent is never replayed or transferred. Unknown worker identity,
+status or credential delivery is not eligible for proactive deregistration.
+
+Worker API v1, fleet configuration v1 and broker journal v1 are unchanged. The
+existing `RegistrationCheckedAt` field also records live deregistration attempts
+before the request, preserving retry throttling across broker restarts. Upgrade
+or roll back the broker using the controlled restart procedure; workers, images
+and network rules need no update. Source tests cover busy/job-start races,
+identity fencing, API failures, restart and quota retention. Live acceptance of
+idle exit and job-start races is still required before production rollout.
+Standalone controller idle draining remains tracked separately in
+[Chickadee issue 26](https://github.com/plover-digital/chickadee/issues/26).
