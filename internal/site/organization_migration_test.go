@@ -121,7 +121,7 @@ func TestOrganizationEnrollmentAcceptsBoundedLargeNativeForm(t *testing.T) {
 	if len(s.enrollments) != 1 || len(s.enrollments[0].OrganizationAccess.RepositoryIDs) != 100 || len(s.enrollments[0].OrganizationAccess.Workflows) != 20 {
 		t.Fatal("large policy was not preserved")
 	}
-	form.Set("padding", strings.Repeat("x", 32<<10))
+	form.Set("padding", strings.Repeat("x", 64<<10))
 	if w := orgPost(s, form); w.Code != 403 {
 		t.Fatalf("oversized enrollment accepted: %d", w.Code)
 	}

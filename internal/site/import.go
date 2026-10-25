@@ -16,7 +16,7 @@ var repositoryName = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9-]{0,38}/[A-Za-z0
 func (s *Server) importEnrollment(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Cache-Control", "no-store")
 	var entry Enrollment
-	decoder := json.NewDecoder(http.MaxBytesReader(w, r.Body, 8192))
+	decoder := json.NewDecoder(http.MaxBytesReader(w, r.Body, 64<<10))
 	decoder.DisallowUnknownFields()
 	if decoder.Decode(&entry) != nil || decoder.Decode(new(any)) != io.EOF || entry.User.ID <= 0 || entry.User.Login == "" || entry.InstallationID <= 0 || entry.Account.ID <= 0 || entry.Account.Login == "" || entry.Repository.ID <= 0 || !repositoryName.MatchString(entry.Repository.Name) || !strings.EqualFold(strings.Split(entry.Repository.Name, "/")[0], entry.Account.Login) || entry.Status != "active" || len(entry.Message) > 500 || !validUsage(entry.Usage, time.Now()) {
 		http.Error(w, "Invalid verified metadata", 400)

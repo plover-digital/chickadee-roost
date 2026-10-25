@@ -32,7 +32,7 @@ func (s *Server) AdminHandler() http.Handler {
 			EnabledWorkflowPath       *string             `json:"enabled_workflow_path"`
 			EnabledWorkflowAccess     *string             `json:"enabled_workflow_access"`
 		}
-		decoder := json.NewDecoder(http.MaxBytesReader(w, r.Body, 8192))
+		decoder := json.NewDecoder(http.MaxBytesReader(w, r.Body, 32<<10))
 		decoder.DisallowUnknownFields()
 		if decoder.Decode(&update) != nil || decoder.Decode(new(any)) != io.EOF || len(update.Message) > 500 || update.EnabledWorkflowAccess != nil && !validWorkflowAccess(*update.EnabledWorkflowAccess) || !validUsage(update.Usage, time.Now()) || update.EnabledWorkflowPath != nil && *update.EnabledWorkflowPath != "" && !validWorkflowPath(*update.EnabledWorkflowPath) {
 			http.Error(w, "Invalid update", 400)

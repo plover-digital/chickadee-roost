@@ -265,7 +265,7 @@ and `applied_organization_access` (confirmed), with `repository_selection` (`all
 or `selected`), `repository_ids` (required for selected; empty for all), and
 `workflows` (optional exact refs). Field absence means the legacy policy, never
 all repositories. The site supports at most 100 repositories per installation,
-100 selected IDs, and 50 workflow references, within the 32 KiB enrollment request and existing store body
+100 selected IDs, and 50 workflow references, within the 64 KiB enrollment request and existing store body
 limits. Other forms retain their 4 KiB limit. An all-repository App installation is required for all-repository access.
 
 The admission policy may supply `profile_catalog`, a full map of queue labels to
@@ -319,3 +319,11 @@ previously confirmed, an owner must enter allowed workflow references or explici
 confirm unrestricted workflows; changing queues alone cannot silently broaden
 unknown legacy workflow restrictions. Cached explicit primary requests match the
 configured primary identity and continue revocation checks during site outages.
+
+Organization usage and resource history require current organization-owner
+verification even for selected-repository groups: the ledger has scope-level
+history, so today's narrower repository ACL cannot safely authorize access to
+earlier activity from a broader scope. Personal repository usage is unchanged.
+The private status endpoint accepts bounded 32 KiB acknowledgments; enrollment
+and private import accept 64 KiB for the full supported policy shape. Rate-limit
+responses from GitHub remain unavailable/retry states, not evidence of revocation.

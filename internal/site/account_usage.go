@@ -12,7 +12,8 @@ import (
 )
 
 // AccountUsage is imported only through the private operator socket. Repository
-// IDs must describe the complete verified selected runner-group access boundary.
+// IDs describe the verified runner-group boundary at observation time.
+// Historical organization totals additionally require current owner authority.
 type RunnerActivity struct {
 	Label        string `json:"label"`
 	Allocated    int    `json:"allocated"`
@@ -88,6 +89,11 @@ func validAccountUsage(entries []AccountUsage, now time.Time) bool {
 }
 func (a AccountUsage) authorized(p page) bool {
 	if a.ObservedAt.Before(time.Now().Add(-5*time.Minute)) || p.User == nil || a.AccountType == "User" && a.AccountID != p.User.ID {
+		return false
+	}
+	// Scope-level history has no per-repository provenance. A current narrower
+	// ACL cannot grant a repository administrator access to earlier wider history.
+	if a.AccountType == "Organization" && !organizationOwner(p.Choices, Enrollment{InstallationID: a.InstallationID, Account: Account{ID: a.AccountID, Type: a.AccountType}}) {
 		return false
 	}
 	if a.RepositorySelection == "all" {

@@ -311,7 +311,18 @@ func (s *Server) fetch(ctx context.Context, path, token string, out any) error {
 		return errors.New("GitHub unavailable")
 	}
 	defer res.Body.Close()
+	if res.StatusCode == 429 || res.StatusCode == 403 && (res.Header.Get("Retry-After") != "" || res.Header.Get("X-RateLimit-Remaining") == "0") {
+		return errors.New("GitHub verification temporarily rate limited")
+	}
 	if res.StatusCode != 200 {
+		if res.StatusCode == 403 {
+			var problem struct {
+				Message string `json:"message"`
+			}
+			if json.NewDecoder(io.LimitReader(res.Body, 1024)).Decode(&problem) == nil && strings.Contains(strings.ToLower(problem.Message), "rate limit") {
+				return errors.New("GitHub verification temporarily rate limited")
+			}
+		}
 		return githubStatusError(res.StatusCode)
 	}
 	b, e := io.ReadAll(io.LimitReader(res.Body, (2<<20)+1))
@@ -767,7 +778,7 @@ func (s *Server) logout(w http.ResponseWriter, r *http.Request) {
 // encoding those validated fields needs more room than the small manage forms.
 func postBodyLimit(path string) int64 {
 	if path == "/enroll" {
-		return 32 << 10
+		return 64 << 10
 	}
 	return 4096
 }
