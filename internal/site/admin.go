@@ -116,14 +116,18 @@ func (s *Server) manage(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
+	s.manageRequest(w, r, v)
+}
+
+func (s *Server) manageRequest(w http.ResponseWriter, r *http.Request, v session) {
 	action := r.FormValue("action")
 	if action != "paused" && action != "active" && action != "disconnected" {
-		http.Error(w, "Invalid action", 400)
+		operationError(w, r, "Invalid action", 400)
 		return
 	}
 	choices, e := s.choices(r.Context(), v)
 	if e != nil {
-		http.Error(w, "GitHub access could not be verified", 502)
+		operationError(w, r, "GitHub access could not be verified", 502)
 		return
 	}
 	s.mu.Lock()
@@ -131,6 +135,10 @@ func (s *Server) manage(w http.ResponseWriter, r *http.Request) {
 	for i, entry := range s.enrollments {
 		if entry.ID != r.FormValue("id") || entry.User.ID != v.User.ID && !organizationOwner(choices, entry) {
 			continue
+		}
+		if v.AgentRepositories != nil && !agentEnrollmentAllowed(v, entry, s.enrollments) {
+			operationError(w, r, "Service is outside this token's repository authority; use browser owner setup for organization-wide controls", 403)
+			return
 		}
 		authorized := false
 		for _, choice := range choices {
@@ -140,7 +148,7 @@ func (s *Server) manage(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 		if !authorized {
-			http.Error(w, "Repository administration access required", 403)
+			operationError(w, r, "Repository administration access required", 403)
 			return
 		}
 		entries := append([]Enrollment(nil), s.enrollments...)
@@ -152,12 +160,12 @@ func (s *Server) manage(w http.ResponseWriter, r *http.Request) {
 		entries[i].Updated = time.Now().UTC()
 		// The reconciler reports applied state; customer requests never claim it.
 		if s.saveLocked(entries) != nil {
-			http.Error(w, "Request could not be saved", 500)
+			operationError(w, r, "Request could not be saved", 500)
 			return
 		}
 		s.enrollments = entries
-		http.Redirect(w, r, "/dashboard", 303)
+		operationAccepted(w, r)
 		return
 	}
-	http.Error(w, "Request not authorized", 403)
+	operationError(w, r, "Request not authorized", 403)
 }

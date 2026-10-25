@@ -20,7 +20,8 @@ and the PKCE verifier, then verifies the identity through `GET /user`.
 The resulting user access token stays in memory in a one-hour session. Tokens are not
 stored in enrollment JSON, browser storage, or guest VMs. HTTPS cookies use the
 `__Host-` prefix, Secure, HttpOnly, and SameSite=Lax. Restarting the web service requires
-users to sign in again. Refresh tokens are not retained.
+users to sign in again. Refresh tokens are not retained unless persistent agent
+delegation is explicitly enabled as described below.
 
 The dashboard reads installations and repositories through GitHub using that user's
 App token. New organization setup requires current active organization-owner membership and
@@ -52,6 +53,32 @@ Native HTML forms require the `same-origin` referrer policy so browsers send a
 usable same-origin Origin header. `Origin: null`, foreign origins, and invalid
 CSRF still fail closed. OAuth callback state, browser nonce, and PKCE checks are
 unchanged by automatic activation.
+
+## Agent delegation
+
+Persistent agent API access is explicitly enabled with a private 32-byte
+`CHICKADEE_AGENT_KEY_FILE`. Signed-in users create named tokens for selected
+repositories and read/manage scope at `/settings/tokens`, with expiry from 1 to
+90 days. This is a deliberate extension of the memory-only browser credential
+model: token digests and delegated GitHub access/refresh grants are stored in a
+versioned authenticated-encryption file in private web state. The encryption key
+stays outside source and state backups. Raw Chickadee token values are shown once
+and never stored. Token pages omit third-party scripts.
+
+Agent tokens survive browser logout and website restarts; the user can revoke
+them from any current session. They can narrow but never expand current GitHub
+access. API repository reads and mutations intersect selected repository IDs
+with live GitHub administration checks. Refresh exchanges verify numeric identity
+and save rotated credentials before access continues. GitHub authorization
+revocation or expiry can require human sign-in again. Normal browser sessions
+retain their one-hour lifetime; without agent delegation enabled, they retain
+no refresh tokens and no persistent GitHub credentials.
+
+Creation and revocation require browser CSRF and exact Origin checks. `/api/v1/`
+requires explicit Bearer authentication, never cookies or query tokens. Service
+mutations share existing browser authorization and admission logic. See the
+[credential design and rollout](agent-api.md), which must be reviewed before
+operator enablement. The website still never receives the runner App private key.
 
 ## App settings for a deployment
 

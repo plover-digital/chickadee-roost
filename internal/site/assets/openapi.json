@@ -1,0 +1,958 @@
+{
+  "openapi": "3.1.0",
+  "info": {
+    "title": "Chickadee Roost service API",
+    "version": "1.0.0",
+    "description": "Human GitHub onboarding creates named, repository-scoped tokens at /settings/tokens. Tokens default to read-only and 30 days, with 1/7/30/90-day choices. Send Authorization: Bearer TOKEN. Normal browser cookies cannot authenticate this API. GitHub still schedules jobs; this API is not a VM execution API. GET routes also support HEAD. Bounded beta lists have no pagination. See /agents.md for approval, state, error and retry semantics. Organization-wide repository/workflow policies require browser owner setup and are excluded from API v1. Existing legacy organization records require their exact recorded user, installation and repository; new organization enrollment is browser-only."
+  },
+  "servers": [
+    {
+      "url": "/"
+    }
+  ],
+  "security": [
+    {
+      "agentToken": []
+    }
+  ],
+  "paths": {
+    "/api/v1/me": {
+      "get": {
+        "operationId": "getIdentity",
+        "summary": "Inspect token identity, name, scope, repositories and expiry",
+        "description": "Requires read or manage scope. Repository-sensitive reads recheck current GitHub administration access.",
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Identity"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid documented JSON request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Invalid, expired, revoked token or GitHub reauthorization needed",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Insufficient scope, repository permission or foreign Origin",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "405": {
+            "description": "Unsupported method; see Allow header",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "502": {
+            "description": "GitHub authorization or refresh unavailable",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Agent credential storage unavailable or capacity limit",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/queues": {
+      "get": {
+        "operationId": "listQueues",
+        "summary": "List supported queue labels; not account enablement or idle capacity",
+        "description": "Requires read or manage scope. Repository-sensitive reads recheck current GitHub administration access.",
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Queues"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid documented JSON request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Invalid, expired, revoked token or GitHub reauthorization needed",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Insufficient scope, repository permission or foreign Origin",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "405": {
+            "description": "Unsupported method; see Allow header",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "502": {
+            "description": "GitHub authorization or refresh unavailable",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Agent credential storage unavailable or capacity limit",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/repositories": {
+      "get": {
+        "operationId": "listRepositories",
+        "summary": "List currently administered repositories permitted by this token",
+        "description": "Requires read or manage scope. Repository-sensitive reads recheck current GitHub administration access.",
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Repositories"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid documented JSON request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Invalid, expired, revoked token or GitHub reauthorization needed",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Insufficient scope, repository permission or foreign Origin",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "405": {
+            "description": "Unsupported method; see Allow header",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "502": {
+            "description": "GitHub authorization or refresh unavailable",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Agent credential storage unavailable or capacity limit",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/enrollments": {
+      "get": {
+        "operationId": "listEnrollments",
+        "summary": "List this user\u2019s authorized service requests and applied state",
+        "description": "Requires read or manage scope. Repository-sensitive reads recheck current GitHub administration access. Explicit desired/applied organization policies are excluded.",
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Enrollments"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid documented JSON request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Invalid, expired, revoked token or GitHub reauthorization needed",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Insufficient scope, repository permission or foreign Origin",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "405": {
+            "description": "Unsupported method; see Allow header",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "502": {
+            "description": "GitHub authorization or refresh unavailable",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Agent credential storage unavailable or capacity limit",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "operationId": "requestEnrollment",
+        "summary": "Create or update a repository\u2019s desired queue selection",
+        "description": "Requires manage scope. A saved request does not change applied runner state until reconciliation. New organization setup and explicit organization policy changes require the browser; existing exact legacy organization requests may be maintained.",
+        "responses": {
+          "202": {
+            "description": "Request accepted for reconciliation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Accepted"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid documented JSON request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Invalid, expired, revoked token or GitHub reauthorization needed",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Insufficient scope, repository permission or foreign Origin",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "405": {
+            "description": "Unsupported method; see Allow header",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "502": {
+            "description": "GitHub authorization or refresh unavailable",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Agent credential storage unavailable or capacity limit",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Organization scope or manager conflict",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "415": {
+            "description": "Use application/json",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Saving failed; inspect state before retrying",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "description": "Exactly one JSON object; maximum 4096 bytes. Omitted queues requests only chickadee. Organization workflow path requirements depend on existing applied access and activation policy.",
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/EnrollmentRequest"
+              },
+              "example": {
+                "installation_id": 8,
+                "repository_id": 99,
+                "queues": [
+                  "chickadee"
+                ]
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/enrollments/{id}/state": {
+      "post": {
+        "operationId": "requestState",
+        "summary": "Request activation/resume, pause or disconnection",
+        "description": "Requires manage scope. A saved request does not change applied runner state until reconciliation. Organization-wide policies and another owner\u2019s enrollment are outside repository token authority.",
+        "responses": {
+          "202": {
+            "description": "Request accepted for reconciliation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Accepted"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid documented JSON request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Invalid, expired, revoked token or GitHub reauthorization needed",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Insufficient scope, repository permission or foreign Origin",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "405": {
+            "description": "Unsupported method; see Allow header",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "502": {
+            "description": "GitHub authorization or refresh unavailable",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Agent credential storage unavailable or capacity limit",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "415": {
+            "description": "Use application/json",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Saving failed; inspect state before retrying",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 100
+            },
+            "description": "Opaque enrollment ID from listEnrollments"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/StateRequest"
+              }
+            }
+          }
+        }
+      }
+    }
+  },
+  "components": {
+    "securitySchemes": {
+      "agentToken": {
+        "type": "http",
+        "scheme": "bearer",
+        "bearerFormat": "opaque chk_ token",
+        "description": "Create through GitHub-authenticated browser settings; never use a GitHub PAT here."
+      }
+    },
+    "schemas": {
+      "Account": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 1
+          },
+          "login": {
+            "type": "string"
+          },
+          "type": {
+            "enum": [
+              "User",
+              "Organization"
+            ]
+          }
+        },
+        "required": [
+          "id",
+          "login",
+          "type"
+        ]
+      },
+      "Repository": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 1
+          },
+          "full_name": {
+            "type": "string"
+          },
+          "private": {
+            "type": "boolean"
+          },
+          "permissions": {
+            "type": "object",
+            "additionalProperties": {
+              "type": "boolean"
+            }
+          }
+        },
+        "required": [
+          "id",
+          "full_name",
+          "private",
+          "permissions"
+        ]
+      },
+      "Installation": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 1
+          },
+          "app_id": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 1
+          },
+          "account": {
+            "$ref": "#/components/schemas/Account"
+          },
+          "permissions": {
+            "type": "object",
+            "additionalProperties": {
+              "type": "string"
+            }
+          }
+        },
+        "required": [
+          "id",
+          "app_id",
+          "account",
+          "permissions"
+        ]
+      },
+      "Enrollment": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "installation_id": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 1
+          },
+          "repository": {
+            "$ref": "#/components/schemas/Repository"
+          },
+          "scope": {
+            "enum": [
+              "repository",
+              "organization"
+            ]
+          },
+          "status": {
+            "enum": [
+              "pending",
+              "approved",
+              "active",
+              "paused",
+              "disconnected",
+              "permission-required",
+              "error"
+            ]
+          },
+          "desired_state": {
+            "enum": [
+              "",
+              "active",
+              "paused",
+              "disconnected"
+            ]
+          },
+          "queues": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "enabled_queues": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "workflow_path": {
+            "type": "string"
+          },
+          "enabled_workflow_path": {
+            "type": "string"
+          },
+          "enabled_workflow_access": {
+            "type": "string"
+          },
+          "updated_at": {
+            "type": "string",
+            "format": "date-time"
+          }
+        },
+        "required": [
+          "id",
+          "installation_id",
+          "repository",
+          "scope",
+          "status",
+          "desired_state",
+          "queues",
+          "enabled_queues",
+          "updated_at"
+        ]
+      },
+      "Error": {
+        "type": "object",
+        "properties": {
+          "error": {
+            "type": "object",
+            "properties": {
+              "code": {
+                "type": "string"
+              },
+              "message": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "code",
+              "message"
+            ]
+          }
+        },
+        "required": [
+          "error"
+        ]
+      },
+      "Accepted": {
+        "type": "object",
+        "properties": {
+          "accepted": {
+            "const": true
+          },
+          "message": {
+            "type": "string"
+          },
+          "status_url": {
+            "const": "/api/v1/enrollments"
+          }
+        },
+        "required": [
+          "accepted",
+          "message",
+          "status_url"
+        ]
+      },
+      "Identity": {
+        "type": "object",
+        "properties": {
+          "user": {
+            "type": "object",
+            "properties": {
+              "id": {
+                "type": "integer",
+                "format": "int64",
+                "minimum": 1
+              },
+              "login": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "id",
+              "login"
+            ]
+          },
+          "scope": {
+            "enum": [
+              "read",
+              "manage"
+            ]
+          },
+          "name": {
+            "type": "string"
+          },
+          "repository_ids": {
+            "type": "array",
+            "items": {
+              "type": "integer",
+              "format": "int64",
+              "minimum": 1
+            }
+          },
+          "expires_at": {
+            "type": "string",
+            "format": "date-time"
+          }
+        },
+        "required": [
+          "user",
+          "scope",
+          "name",
+          "repository_ids",
+          "expires_at"
+        ]
+      },
+      "Queues": {
+        "type": "object",
+        "properties": {
+          "default_queue": {
+            "const": "chickadee"
+          },
+          "queues": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          }
+        },
+        "required": [
+          "default_queue",
+          "queues"
+        ]
+      },
+      "Repositories": {
+        "type": "object",
+        "properties": {
+          "automatic_activation": {
+            "type": "boolean"
+          },
+          "repositories": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "installation": {
+                  "$ref": "#/components/schemas/Installation"
+                },
+                "repository": {
+                  "$ref": "#/components/schemas/Repository"
+                },
+                "enrollment_notice": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "installation",
+                "repository"
+              ]
+            }
+          }
+        },
+        "required": [
+          "automatic_activation",
+          "repositories"
+        ]
+      },
+      "Enrollments": {
+        "type": "object",
+        "properties": {
+          "enrollments": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Enrollment"
+            }
+          }
+        },
+        "required": [
+          "enrollments"
+        ]
+      },
+      "EnrollmentRequest": {
+        "type": "object",
+        "properties": {
+          "installation_id": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 1
+          },
+          "repository_id": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 1
+          },
+          "queues": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "maxItems": 8
+          },
+          "workflow_path": {
+            "type": "string",
+            "maxLength": 125
+          }
+        },
+        "required": [
+          "installation_id",
+          "repository_id"
+        ],
+        "additionalProperties": false
+      },
+      "StateRequest": {
+        "type": "object",
+        "properties": {
+          "state": {
+            "enum": [
+              "active",
+              "paused",
+              "disconnected"
+            ]
+          }
+        },
+        "required": [
+          "state"
+        ],
+        "additionalProperties": false
+      }
+    }
+  }
+}

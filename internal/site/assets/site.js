@@ -34,3 +34,16 @@ for (const workflow of document.querySelectorAll('.first-workflow')) {
     }
   });
 }
+
+const agentCopy = document.getElementById('copy-agent-token');
+if (agentCopy) {
+  agentCopy.addEventListener('click', async () => {
+    const status = document.getElementById('agent-copy-status');
+    try {
+      await navigator.clipboard.writeText(document.getElementById('agent-token').textContent);
+      status.textContent = 'Token copied';
+    } catch {
+      status.textContent = 'Select and copy the token above.';
+    }
+  });
+}
