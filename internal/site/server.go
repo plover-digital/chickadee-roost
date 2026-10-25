@@ -717,6 +717,10 @@ func (s *Server) enrollRequest(w http.ResponseWriter, r *http.Request, v session
 			}
 		}
 		if entry.InstallationID == iid && (entry.Repository.ID == rid || access != nil && entry.Account.ID == choice.Installation.Account.ID) && (entry.User.ID == v.User.ID || access != nil && choice.OrganizationAdmin) {
+			if v.AgentRepositories != nil && !agentEnrollmentAllowed(v, entry, s.enrollments) {
+				operationError(w, r, agentOrganizationSetupMessage, http.StatusForbidden)
+				return
+			}
 			if access != nil && len(access.Workflows) == 0 && entry.OrganizationAccess == nil && entry.EnabledWorkflowAccess != "repository" && entry.WorkflowPath == "" && entry.EnabledWorkflowPath == "" && r.FormValue("confirm_all_workflows") != "1" {
 				operationError(w, r, "Existing workflow access is unknown. Enter allowed workflow references or explicitly confirm all workflows.", 400)
 				return

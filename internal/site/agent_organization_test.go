@@ -140,3 +140,26 @@ func TestAgentCannotUseLegacyRowAfterOrganizationConversion(t *testing.T) {
 		t.Fatal("legacy leftover bypassed canonical organization scope")
 	}
 }
+
+func TestAgentRestoredAppliedPolicyCannotBeUpdatedAsLegacy(t *testing.T) {
+	s, token, canonical := agentOrganizationFixture(t)
+	canonical.ID = "canonical-legacy"
+	retained := canonical
+	retained.ID = "retained-applied-policy"
+	retained.Status = "paused"
+	retained.AppliedOrganizationAccess = &OrganizationAccess{RepositorySelection: "all"}
+	// Older/restored stores are validated on load, but not deduplicated. The exact
+	// row chosen by the update loop must satisfy the API boundary independently.
+	if err := s.saveLocked([]Enrollment{retained, canonical}); err != nil {
+		t.Fatal(err)
+	}
+	restored, err := New(s.cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	restored.http.Transport = s.http.Transport
+	got := agentCall(restored, token, "POST", "/api/v1/enrollments", `{"installation_id":8,"repository_id":99,"queues":["chickadee-small-ubuntu-2604"]}`)
+	if got.Code != 403 || restored.enrollments[0].Queues[0] != "chickadee" {
+		t.Fatal("restored applied organization policy was updated as a legacy repository service")
+	}
+}
