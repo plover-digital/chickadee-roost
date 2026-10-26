@@ -354,6 +354,47 @@ class OrganizationReconcileMain(unittest.TestCase):
         changed['repository']['id']=999
         with self.assertRaises(ValueError):m.validate_scope_merge(old,changed,authenticated=True)
 
+    def test_legacy_owner_handoff_survives_resume_and_subsequent_reconciliations(self):
+        config,entry,policy=copy.deepcopy((self.config,self.entry,self.policy))
+        for snapshot in (True,False):
+            with self.subTest(repository_permission_snapshot=snapshot):
+                self.config,self.entry,self.policy=copy.deepcopy((config,entry,policy))
+                self.legacy_primary()
+                if not snapshot:self.entry['repository'].pop('permissions')
+                old=copy.deepcopy(self.entry)
+                old['user']={'id':99,'login':'former-manager'}
+                self.policy['managed_requests']=[old]
+                self.entry['desired_state']='disconnected'
+                _,statuses,_,_=self.run_reconcile()
+                self.assertEqual(statuses[-1]['status'],'disconnected')
+                self.entry.update(status='disconnected',desired_state='active',enabled_queues=[])
+                _,statuses,helpers,_=self.run_reconcile()
+                self.assertEqual(statuses[-1]['status'],'active')
+                self.assertEqual(helpers,[])
+                # The durable operator seed intentionally still names the old
+                # manager. Neither pending initialization nor later active
+                # observations may undo the verified owner's handoff.
+                for status in ('pending','active','active'):
+                    self.entry.update(status=status,enabled_queues=[] if status=='pending' else ['chickadee'])
+                    installs,statuses,helpers,_=self.run_reconcile()
+                    self.assertEqual(installs,[])
+                    self.assertEqual(helpers,[])
+                    self.assertEqual(statuses[-1]['status'],'active')
+                    self.assertNotIn('disabled',self.config['scopes']['primary'])
+                self.assertEqual(self.policy['managed_requests'][0]['user'],old['user'])
+
+    def test_existing_legacy_handoff_trust_cannot_provision_or_accept_imports(self):
+        self.legacy_primary()
+        self.entry['repository'].pop('permissions')
+        self.assertTrue(m.trusted_site_entry(self.entry,True,self.config))
+        self.assertFalse(m.trusted_site_entry(self.entry,True,{}))
+        nonprimary=copy.deepcopy(self.config)
+        nonprimary['scopes'][m.scope_name(self.entry)]=nonprimary['scopes'].pop('primary')
+        self.assertFalse(m.trusted_site_entry(self.entry,True,nonprimary))
+        for field,value in (('authenticated',False),('installation_id',99),('installation_id',True)):
+            changed=copy.deepcopy(self.entry);changed[field]=value
+            self.assertFalse(m.trusted_site_entry(changed,True,self.config))
+
     def test_legacy_primary_flat_active_config_remains_read_only(self):
         self.legacy_primary()
         primary=self.config.pop('scopes')['primary']

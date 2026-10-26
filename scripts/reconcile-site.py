@@ -198,12 +198,18 @@ def collect_account_usage(config, records, jwt, api, now, status=None):
     return [value for key,value in result.items() if key not in invalid]
 
 
-def authenticated_request(entry):
-    """Only private-admin site records with verified identity can enter auto policy."""
+def authenticated_identity(entry):
+    """Server-assigned provenance and bounded immutable identity, never imports."""
     if entry.get('authenticated') is not True:return False
     if not isinstance(entry.get('id'),str) or not entry['id']:return False
     for value in (entry.get('user',{}).get('id'),entry.get('account',{}).get('id'),entry.get('repository',{}).get('id'),entry.get('installation_id')):
         if type(value)!=int or value<=0:return False
+    return True
+
+
+def authenticated_request(entry):
+    """Only private-admin site records with verified identity can enter auto policy."""
+    if not authenticated_identity(entry):return False
     account=entry['account'];repo=entry['repository']
     if account.get('type')=='User':return account['id']==entry['user']['id']
     if account.get('type')=='Organization':return entry.get('organization_access') is not None or entry.get('desired_state') in ('paused','disconnected') or entry.get('status') in ('paused','disconnected') or (repo.get('permissions') or {}).get('admin') is True
@@ -211,17 +217,23 @@ def authenticated_request(entry):
 
 
 def trusted_site_entry(entry, site_available, config):
-    if not authenticated_request(entry):return False
-    if site_available:return True
-    # Cached provenance may maintain existing scopes, never provision a new one.
-    scope=(config.get('scopes') or {}).get(configured_scope_name(config,entry))
+    if not authenticated_identity(entry):return False
+    if entry.get('account',{}).get('type')!='Organization' and not authenticated_request(entry):return False
+    if site_available and authenticated_request(entry):return True
+    # Existing primary identity also preserves an owner's legacy handoff after
+    # resume, even when the original repository permission snapshot is absent.
+    # This fallback can never provision a new scope; mutations still recheck
+    # current owner/repository authority before configuration changes.
+    name=configured_scope_name(config,entry)
+    if not authenticated_request(entry) and name!='primary':return False
+    scope=(config.get('scopes') or {}).get(name)
     url='https://github.com/'+(entry['account']['login'] if entry['account']['type']=='Organization' else entry['repository']['full_name'])
     return bool(scope and scope.get('app_installation_id')==entry['installation_id'] and scope.get('github_url','').lower().rstrip('/')==url.lower().rstrip('/'))
 
 
 def approved_request(entry, policy, profile_catalog=None, authenticated=False):
     approval=policy.get('approved_users',{}).get(str(entry['user']['id']))
-    if approval is None and policy.get('auto_approve_authenticated') is True and authenticated and authenticated_request(entry):
+    if approval is None and policy.get('auto_approve_authenticated') is True and authenticated and (authenticated_request(entry) or entry.get('account',{}).get('type')=='Organization' and authenticated_identity(entry)):
         approval={'auto_queues':True,'max_vms':1}
     if approval is None:return None
     desired=entry.get('desired_state') or 'active'
@@ -251,10 +263,9 @@ def configured_scope_name(config,entry):
 def validate_scope_merge(previous, entry, authenticated=False):
     if previous is not None and authenticated and entry.get('organization_access') is not None and previous.get('account',{}).get('type')==entry.get('account',{}).get('type')=='Organization' and previous['account']['id']==entry['account']['id'] and previous['installation_id']==entry['installation_id']:
         return
-    # A currently verified owner may stop a legacy service created by another
-    # manager. Keep its installation/repository identity and recheck the acting
-    # owner's authority before touching the primary scope below.
-    if previous is not None and authenticated and (entry.get('desired_state') in ('paused','disconnected') or entry.get('status') in ('paused','disconnected')) and previous.get('account',{}).get('type')==entry.get('account',{}).get('type')=='Organization' and previous['account']['id']==entry['account']['id'] and previous['installation_id']==entry['installation_id'] and previous['repository']['id']==entry['repository']['id']:
+    # Preserve a site-authenticated manager handoff beyond stop/resume. The
+    # immutable scope stays unchanged and mutations recheck current authority.
+    if previous is not None and authenticated and previous.get('account',{}).get('type')==entry.get('account',{}).get('type')=='Organization' and previous['account']['id']==entry['account']['id'] and previous['installation_id']==entry['installation_id'] and previous['repository']['id']==entry['repository']['id']:
         return
     # A personal owner may reinstall the App after disconnecting. The new
     # installation is still checked against GitHub before any scope is applied.
