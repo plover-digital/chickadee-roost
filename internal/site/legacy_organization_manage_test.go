@@ -191,3 +191,44 @@ func TestLegacyOrganizationDashboardOwnerLifecycleWithoutAnchor(t *testing.T) {
 		})
 	}
 }
+
+func TestLegacyOrganizationDashboardCanonicalLifecycleBeatsVisibleFailedRequest(t *testing.T) {
+	for _, status := range []string{"active", "paused", "disconnected"} {
+		t.Run(status, func(t *testing.T) {
+			s := orgAccessFixture(t)
+			account := Account{10, "example", "Organization"}
+			failed := Enrollment{ID: "failed", User: User{7, "owner"}, InstallationID: 8, Account: account, Repository: Repository{ID: 99, Name: "example/one"}, Scope: "organization", Status: "error", DesiredState: "active", Queues: []string{"chickadee"}}
+			canonical := Enrollment{ID: "established", User: User{8, "former-owner"}, InstallationID: 8, Account: account, Repository: Repository{ID: 101, Name: "example/removed"}, Scope: "organization", Status: status, DesiredState: status, Queues: []string{"chickadee"}, EnabledQueues: []string{"chickadee"}, Usage: []UsageDay{{Date: "2026-10-25", VMSeconds: 987654, VMs: 4321}}}
+			s.enrollments = []Enrollment{failed, canonical}
+			req := httptest.NewRequest("GET", "/dashboard", nil)
+			req.AddCookie(&http.Cookie{Name: "__Host-chickadee-session", Value: "session"})
+			w := httptest.NewRecorder()
+			s.ServeHTTP(w, req)
+			if w.Code != http.StatusOK {
+				t.Fatalf("dashboard: %d %s", w.Code, w.Body.String())
+			}
+			body := w.Body.String()
+			start := strings.Index(body, `action="/manage"`)
+			if start < 0 {
+				t.Fatal("owner lifecycle form missing")
+			}
+			end := strings.Index(body[start:], "</form>")
+			if end < 0 {
+				t.Fatal("lifecycle form not closed")
+			}
+			form := body[start : start+end]
+			if !strings.Contains(form, `name="id" value="established"`) || strings.Contains(form, `value="failed"`) {
+				t.Fatal("failed visible request replaced canonical lifecycle target")
+			}
+			if !strings.Contains(body, `<span class="status">`+status+`</span>`) {
+				t.Fatal("canonical applied service status lost")
+			}
+			if strings.Count(body, `action="/manage"`) != 1 || strings.Contains(body, "16460.9") || strings.Contains(body, "4321") || strings.Contains(body, "Only enabled labels are listed") || strings.Contains(body, `https://github.com/example/removed/actions`) {
+				t.Fatal("canonical lifecycle grouping disclosed unavailable data or duplicated controls")
+			}
+			if !reflect.DeepEqual(s.enrollments, []Enrollment{failed, canonical}) {
+				t.Fatal("view grouping changed stored records")
+			}
+		})
+	}
+}
