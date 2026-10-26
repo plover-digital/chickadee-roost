@@ -198,30 +198,42 @@ def collect_account_usage(config, records, jwt, api, now, status=None):
     return [value for key,value in result.items() if key not in invalid]
 
 
-def authenticated_request(entry):
-    """Only private-admin site records with verified identity can enter auto policy."""
+def authenticated_identity(entry):
+    """Server-assigned provenance and bounded immutable identity, never imports."""
     if entry.get('authenticated') is not True:return False
     if not isinstance(entry.get('id'),str) or not entry['id']:return False
     for value in (entry.get('user',{}).get('id'),entry.get('account',{}).get('id'),entry.get('repository',{}).get('id'),entry.get('installation_id')):
         if type(value)!=int or value<=0:return False
+    return True
+
+
+def authenticated_request(entry):
+    """Only private-admin site records with verified identity can enter auto policy."""
+    if not authenticated_identity(entry):return False
     account=entry['account'];repo=entry['repository']
     if account.get('type')=='User':return account['id']==entry['user']['id']
-    if account.get('type')=='Organization':return entry.get('organization_access') is not None or (repo.get('permissions') or {}).get('admin') is True
+    if account.get('type')=='Organization':return entry.get('organization_access') is not None or entry.get('desired_state') in ('paused','disconnected') or entry.get('status') in ('paused','disconnected') or (repo.get('permissions') or {}).get('admin') is True
     return False
 
 
 def trusted_site_entry(entry, site_available, config):
-    if not authenticated_request(entry):return False
-    if site_available:return True
-    # Cached provenance may maintain existing scopes, never provision a new one.
-    scope=(config.get('scopes') or {}).get(configured_scope_name(config,entry))
+    if not authenticated_identity(entry):return False
+    if entry.get('account',{}).get('type')!='Organization' and not authenticated_request(entry):return False
+    if site_available and authenticated_request(entry):return True
+    # Existing primary identity also preserves an owner's legacy handoff after
+    # resume, even when the original repository permission snapshot is absent.
+    # This fallback can never provision a new scope; mutations still recheck
+    # current owner/repository authority before configuration changes.
+    name=configured_scope_name(config,entry)
+    if not authenticated_request(entry) and name!='primary':return False
+    scope=(config.get('scopes') or {}).get(name)
     url='https://github.com/'+(entry['account']['login'] if entry['account']['type']=='Organization' else entry['repository']['full_name'])
     return bool(scope and scope.get('app_installation_id')==entry['installation_id'] and scope.get('github_url','').lower().rstrip('/')==url.lower().rstrip('/'))
 
 
 def approved_request(entry, policy, profile_catalog=None, authenticated=False):
     approval=policy.get('approved_users',{}).get(str(entry['user']['id']))
-    if approval is None and policy.get('auto_approve_authenticated') is True and authenticated and authenticated_request(entry):
+    if approval is None and policy.get('auto_approve_authenticated') is True and authenticated and (authenticated_request(entry) or entry.get('account',{}).get('type')=='Organization' and authenticated_identity(entry)):
         approval={'auto_queues':True,'max_vms':1}
     if approval is None:return None
     desired=entry.get('desired_state') or 'active'
@@ -243,13 +255,17 @@ def configured_scope_name(config,entry):
     logical=scope_name(entry)
     primary=(config.get('scopes') or {}).get('primary',{})
     url='https://github.com/'+(entry['account']['login'] if entry['account']['type']=='Organization' else entry['repository']['full_name'])
-    if entry.get('organization_access') is not None and primary.get('app_installation_id')==entry['installation_id'] and primary.get('github_url','').lower().rstrip('/')==url.lower().rstrip('/'):
+    if primary.get('app_installation_id')==entry['installation_id'] and primary.get('github_url','').lower().rstrip('/')==url.lower().rstrip('/'):
         return 'primary'
     return logical
 
 
 def validate_scope_merge(previous, entry, authenticated=False):
     if previous is not None and authenticated and entry.get('organization_access') is not None and previous.get('account',{}).get('type')==entry.get('account',{}).get('type')=='Organization' and previous['account']['id']==entry['account']['id'] and previous['installation_id']==entry['installation_id']:
+        return
+    # Preserve a site-authenticated manager handoff beyond stop/resume. The
+    # immutable scope stays unchanged and mutations recheck current authority.
+    if previous is not None and authenticated and previous.get('account',{}).get('type')==entry.get('account',{}).get('type')=='Organization' and previous['account']['id']==entry['account']['id'] and previous['installation_id']==entry['installation_id'] and previous['repository']['id']==entry['repository']['id']:
         return
     # A personal owner may reinstall the App after disconnecting. The new
     # installation is still checked against GitHub before any scope is applied.
@@ -497,20 +513,26 @@ def main():
         request=approved_request(entry,policy,catalog,authenticated=scope_name(entry) in authenticated_scopes)
         if request is None:continue
         name=scope_name(entry)
-        # Legacy enrollments remain read-only for the primary scope. Explicit
-        # organization policy requires fresh owner verification and a separate catalog.
+        # Legacy activation remains read-only. An owner may still stop the
+        # primary scope without first broadening its repository/workflow policy.
         url='https://github.com/'+(entry['account']['login'] if entry['account']['type']=='Organization' else entry['repository']['full_name'])
         primary=candidate.get('scopes',{}).get('primary',{}).get('github_url',candidate.get('github_url',''))
-        if url.lower().rstrip('/')==primary.lower().rstrip('/') and entry.get('organization_access') is None:
-            profiles=(candidate.get('scopes',{}).get('primary') or candidate).get('profiles',{})
-            enabled=[q for q in (entry.get('queues') or ['chickadee']) if q in profiles]
-            if entry.get('id'):updates.append({'id':entry['id'],'status':'active','enabled_queues':enabled,'message':'Operator-managed access is unchanged. An organization owner can update repository access and queues in setup.'})
+        legacy_primary=url.lower().rstrip('/')==primary.lower().rstrip('/') and entry.get('organization_access') is None
+        desired=entry.get('desired_state') or 'active'
+        legacy_resume=legacy_primary and desired=='active' and entry.get('status') in ('paused','disconnected')
+        if legacy_primary and desired=='active' and not legacy_resume:
+            existing=candidate.get('scopes',{}).get('primary') or candidate
+            identity_matches=existing.get('app_installation_id')==entry['installation_id']
+            disabled=existing.get('disabled',False)
+            enabled=[] if disabled or not identity_matches else [q for q in (entry.get('queues') or ['chickadee']) if q in existing['profiles']]
+            status='permission-required' if not identity_matches else 'pending' if disabled else 'active'
+            if entry.get('id'):updates.append({'id':entry['id'],'status':status,'enabled_queues':enabled,'message':'Organization owner setup is required to resume this disabled organization.' if disabled else 'Operator-managed access is unchanged. An organization owner can update repository access and queues in setup.'})
             continue
         if url.lower().rstrip('/')==primary.lower().rstrip('/'):
             name='primary'
             if not candidate.get('scopes'):raise ValueError('migrate flat operator config before organization management')
         existing=candidate.get('scopes',{}).get(name)
-        if entry.get('organization_access') is not None and existing and existing.get('app_installation_id')!=entry['installation_id']:
+        if (entry.get('organization_access') is not None or legacy_primary) and existing and existing.get('app_installation_id')!=entry['installation_id']:
             if entry.get('id'):updates.append({'id':entry['id'],'status':'permission-required','enabled_queues':[],'message':'The configured organization installation has changed; operator reconciliation is required.'})
             continue
         if name in verified:raise ValueError('multiple requests target one scope; operator reconciliation required')
@@ -524,11 +546,12 @@ def main():
             admit.validate_installation_identity(installation,entry)
             required='organization_self_hosted_runners' if entry['account']['type']=='Organization' else 'administration'
             installation_revoked=bool(installation.get('suspended_at')) or installation['permissions'].get(required)!='write'
-            members_missing=entry.get('organization_access') is not None and installation['permissions'].get('members') not in ('read','write')
+            owner_required=entry.get('organization_access') is not None or (legacy_primary and entry['account']['type']=='Organization')
+            members_missing=owner_required and installation['permissions'].get('members') not in ('read','write')
             revoked=installation_revoked or members_missing
             if not revoked:
                 permissions={required:'write','metadata':'read'}
-                if entry.get('organization_access') is not None:
+                if owner_required:
                     permissions['members']='read'
                 token=admit.setup.api('/app/installations/'+str(entry['installation_id'])+'/access_tokens','POST',jwt,{'permissions':permissions})['token']
                 found=False
@@ -537,23 +560,35 @@ def main():
                     found=any(r['id']==entry['repository']['id'] and r['full_name']==entry['repository']['full_name'] for r in listing['repositories'])
                     if found or len(listing['repositories'])<100:break
                 if not found and len(listing['repositories'])==100:raise RuntimeError('repository verification exceeded page limit')
-                revoked=not found and entry.get('organization_access') is None
-                if not revoked and (scope_name(entry) in authenticated_scopes or entry.get('organization_access') is not None) and entry['account']['type']=='Organization':
-                    admin_missing=not (admit.current_organization_owner(entry,token) if entry.get('organization_access') is not None else admit.current_repository_admin(entry,token))
+                revoked=not found and not owner_required
+                if not revoked and (scope_name(entry) in authenticated_scopes or owner_required) and entry['account']['type']=='Organization':
+                    admin_missing=not (admit.current_organization_owner(entry,token) if owner_required else admit.current_repository_admin(entry,token))
                     revoked=admin_missing
         except RuntimeError as err:
             # A 404 from App-authenticated installation lookup confirms removal.
             if lookup_installation and str(err)=='GitHub setup API returned HTTP 404':revoked=True;installation_revoked=True
             else:raise
+        if legacy_primary and not installation_revoked and (members_missing or admin_missing):
+            # A rejected resume does not change the already applied stopped
+            # state. Retain it so restored authority can retry the intent.
+            blocked_status=entry['status'] if legacy_resume and existing.get('disabled') else 'permission-required'
+            if entry.get('id'):updates.append({'id':entry['id'],'status':blocked_status,'enabled_queues':[],'message':'Organization owner access and the App Members read permission are required to manage the operator-managed organization.'})
+            continue
         if revoked or desired!='active':
             old=candidate.get('scopes',{}).get(name)
-            if revoked and old and entry.get('organization_access') is None:
+            if revoked and old and entry.get('organization_access') is None and name!='primary':
                 candidate['scopes'].pop(name);quarantine.add(old['github_url'].lower().rstrip('/'))
             elif old:
                 if installation_revoked and not old.get('disabled'):quarantine.add(old['github_url'].lower().rstrip('/'))
                 old['disabled']=True
-            status=desired if desired!='active' else 'permission-required'
+            status=desired if desired!='active' else entry['status'] if legacy_resume else 'permission-required'
             message=('Approve the App Members read permission to verify organization owner access.' if members_missing else 'The requesting user must currently own the organization; restore access and retry.' if admin_missing and entry.get('organization_access') is not None else 'The signup user must currently have admin access to the selected repository; restore access and retry.' if admin_missing else 'GitHub access removed, suspended, or awaiting permission approval.') if revoked else 'New assignments stopped; running jobs finished before applying this state.'
+        elif legacy_resume:
+            # Explicit resume of a confirmed stopped service restores only its
+            # existing queues. Never invoke admission or rewrite GitHub ACLs.
+            existing.pop('disabled',None)
+            enabled=[q for q in (entry.get('queues') or ['chickadee']) if q in existing['profiles']]
+            status='active'
         else:
             if name=='primary' and not policy.get('profile_catalog'):
                 if entry.get('id'):updates.append({'id':entry['id'],'status':'pending','enabled_queues':entry.get('enabled_queues',[]),'message':'The operator must configure the independent profile catalog before this organization can manage its queues.'})
@@ -594,7 +629,8 @@ def main():
             scope.pop('disabled',None)
             enabled=list(scope['profiles']);status='active';applied_workflow='' if mode in ('repository','organization') else workflow;applied_access='repository' if mode=='organization' else mode
             if set(entry.get('queues') or ['chickadee'])-set(enabled):message='Additional queue requests are awaiting operator approval.'
-        if entry.get('id'):updates.append({'id':entry['id'],**({'applied_organization_access':entry['organization_access']} if status=='active' and entry.get('organization_access') is not None else {}),'status':status,'enabled_queues':enabled,'enabled_workflow_path':applied_workflow,'enabled_workflow_access':applied_access,'message':message})
+        workflow_update={} if legacy_primary else {'enabled_workflow_path':applied_workflow,'enabled_workflow_access':applied_access}
+        if entry.get('id'):updates.append({'id':entry['id'],**({'applied_organization_access':entry['organization_access']} if status=='active' and entry.get('organization_access') is not None else {}),'status':status,'enabled_queues':enabled,**workflow_update,'message':message})
         elif status=='active':updates.append({'id':'','status':status,'enabled_queues':enabled,'message':message,'_import':dict(entry,queues=request['queues'],enabled_queues=enabled,status='active',scope=('organization' if entry['account']['type']=='Organization' else 'repository'))})
     if candidate!=original:
         if site_available:
@@ -602,6 +638,9 @@ def main():
                 if update['status']!='active' or not update.get('id'):continue
                 old_entry=next(e for e in entries if e.get('id')==update['id'])
                 name=configured_scope_name(original,old_entry)
+                # Keep the confirmed stopped status until a legacy resume is
+                # acknowledged, so a rejected reload remains eligible to retry.
+                if name=='primary' and old_entry.get('organization_access') is None:continue
                 if candidate.get('scopes',{}).get(name)==original.get('scopes',{}).get(name):continue
                 admin('status',{'id':update['id'],'status':'approved','enabled_queues':[q for q in original.get('scopes',{}).get(name,{}).get('profiles',{}) if q in (old_entry.get('queues') or ['chickadee'])],
                      'message':'Approved; activating selected queues in the shared fleet.' if policy.get('live_reload') is True and not quarantine else 'Approved; provisioning the selected queues after running jobs finish.'})

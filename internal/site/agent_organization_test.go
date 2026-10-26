@@ -89,9 +89,6 @@ func TestAgentLegacyOrganizationIdentityRemainsExact(t *testing.T) {
 			}
 			got = agentCall(s, token, "POST", "/api/v1/enrollments/"+e.ID+"/state", `{"state":"paused"}`)
 			expected := 403
-			if mode == "own" {
-				expected = 202
-			}
 			if got.Code != expected {
 				t.Fatalf("legacy manage returned %d, want %d", got.Code, expected)
 			}

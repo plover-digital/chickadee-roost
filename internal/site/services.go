@@ -53,8 +53,13 @@ func (p page) Services() []ServiceView {
 			if !found {
 				service.Repositories = append(service.Repositories, entry.Repository)
 			}
+		}
+		if authorized || entry.LifecycleOwner {
 			// Scope usage is repeated per enrollment by the relay; take one latest
 			// snapshot rather than summing it and double-counting VM minutes.
+			// Owner lifecycle entries have already had unavailable usage and
+			// runner grants scrubbed by the dashboard; they still identify the
+			// established service when its repository anchor has disappeared.
 			if service.Status == "permission-required" || organizationRank(entry) > organizationRank(service.Enrollment) || organizationRank(entry) == organizationRank(service.Enrollment) && entry.Updated.After(service.Updated) {
 				service.Enrollment = entry
 			}

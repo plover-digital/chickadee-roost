@@ -21,7 +21,8 @@ follow redirects with credentials. Responses use Cache-Control: no-store.
 
 Read is the default. Manage includes read access and can request queue changes,
 enrollment, activation, pause and disconnection for selected repositories the
-user currently administers. The token can narrow the user's access, never expand
+user currently administers. Organization pause, resume, and disconnect require
+verified owner access in the browser, including legacy services. The token can narrow the user's access, never expand
 it. A new repository is not automatically added to an existing token. There is
 no operator/admin API access and no token-creation or token-refresh API.
 
@@ -49,7 +50,8 @@ otherwise agent access returns 503. Normal GitHub browser sign-in remains usable
    owner. Organization-wide repository/workflow policies are browser-only in
    API v1; repository tokens cannot view or change those shared services.
    Personal services and existing legacy single-repository organization services
-   remain available through the API. If authorized by the user, use a manage
+   remain available for lookup and queue updates through the API. Organization
+   lifecycle controls require the browser. If authorized by the user, use a manage
    token to POST /api/v1/enrollments
    with the verified installation_id, repository_id and full desired queues
    list. This creates or updates the request; omitted queues means the default
@@ -128,12 +130,15 @@ browser owner setup; this endpoint can maintain only an existing exact legacy
 organization record. Organization policy fields are not accepted by API v1.
 Unknown fields (including private, authenticated and workflow access grants)
 are rejected. Existing service state is retained when queues are updated;
-use the state endpoint to resume or reconnect a paused/disconnected service.
+use the state endpoint for personal services or the browser for organization
+services to resume or reconnect a paused/disconnected service.
 
 POST /api/v1/enrollments/{id}/state (manage)
 Body: {"state":"active"} or {"state":"paused"} or {"state":"disconnected"}
 Use the opaque id from the enrollment response. active requests activation,
 resume or reconnect; approval is still enforced by reconciliation.
+This endpoint accepts personal services only. Organization lifecycle requests
+return 403; use the browser with verified organization owner access.
 
 Both POST endpoints return 202:
 {"accepted":true,"message":"Request saved; applied service state is unchanged until reconciliation.","status_url":"/api/v1/enrollments"}
