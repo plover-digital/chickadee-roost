@@ -101,6 +101,7 @@ class OrganizationReconcileMain(unittest.TestCase):
         self.policy_path.write_text(json.dumps(self.policy))
         self.policy_path.chmod(0o600)
         installs, statuses, helper_inputs, events = [], [], [], []
+        self.observed_statuses=statuses
 
         def api(path, method="GET", token=None, body=None):
             if path == "/app/installations/2":
@@ -108,7 +109,7 @@ class OrganizationReconcileMain(unittest.TestCase):
             if path == "/app/installations/2/access_tokens":
                 return {"token": "fixture-token"}
             if path == "/installation/repositories?per_page=100&page=1":
-                return {"repositories": [self.repository]}
+                return {"repositories": [] if getattr(self,'missing_repository',False) else [self.repository]}
             if path == "/orgs/example/memberships/owner":
                 return {
                     "state": "active", "role": "admin",
@@ -145,6 +146,7 @@ class OrganizationReconcileMain(unittest.TestCase):
             raise AssertionError("Unexpected subprocess: " + repr(command))
 
         def install(candidate, path, quarantine, **kwargs):
+            if getattr(self,'reject_install',False):raise m.LiveReloadRejected('fixture rejected reload')
             installs.append((copy.deepcopy(candidate), set(quarantine), kwargs))
             events.append("install")
             path.write_text(json.dumps(candidate))
@@ -196,6 +198,170 @@ class OrganizationReconcileMain(unittest.TestCase):
         expected["scopes"]["primary"]["disabled"] = True
         self.assertEqual(candidate, expected)
         self.assertEqual(set(candidate["scopes"]), {"primary"})
+
+    def legacy_primary(self):
+        self.entry.pop('organization_access')
+        self.entry['repository']['permissions']={'admin':True}
+
+    def test_legacy_primary_owner_stop_preserves_scope_and_acknowledges_after_reload(self):
+        self.legacy_primary()
+        self.policy.pop('profile_catalog')
+        for desired in ('paused','disconnected'):
+            with self.subTest(desired=desired):
+                self.config['scopes']['primary'].pop('disabled',None)
+                self.entry['desired_state']=desired
+                installs,statuses,helpers,events=self.run_reconcile()
+                self.assertEqual(len(installs),1)
+                self.assert_preserved_disabled(installs[0][0])
+                self.assertEqual(installs[0][1],set())
+                self.assertEqual(statuses[-1]['status'],desired)
+                self.assertEqual(statuses[-1]['enabled_queues'],[])
+                self.assertEqual(helpers,[])
+                self.assertLess(events.index('install'),events.index('status'))
+                installs,statuses,_,_=self.run_reconcile()
+                self.assertEqual(installs,[])
+                self.assertEqual(statuses[-1]['status'],desired)
+
+    def test_legacy_primary_disabled_active_never_reports_capacity_or_resumes(self):
+        self.legacy_primary()
+        self.config['scopes']['primary']['disabled']=True
+        installs,statuses,helpers,_=self.run_reconcile()
+        self.assertEqual(installs,[])
+        self.assertEqual(helpers,[])
+        self.assertEqual(statuses[-1]['status'],'pending')
+        self.assertEqual(statuses[-1]['enabled_queues'],[])
+
+    def test_legacy_primary_explicit_resume_preserves_queues_limits_and_acl(self):
+        self.legacy_primary()
+        self.entry['status']='disconnected'
+        self.entry['repository'].pop('permissions')
+        self.config['scopes']['primary']['disabled']=True
+        self.policy.pop('profile_catalog')
+        extra=copy.deepcopy(self.config['scopes']['primary']['profiles']['chickadee'])
+        self.config['scopes']['primary']['profiles']['chickadee-small-rocky-102']=extra
+        original=copy.deepcopy(self.config)
+        installs,statuses,helpers,events=self.run_reconcile()
+        original['scopes']['primary'].pop('disabled')
+        self.assertEqual(installs[0][0],original)
+        self.assertEqual(installs[0][1],set())
+        self.assertEqual(helpers,[])
+        self.assertEqual(statuses[-1]['status'],'active')
+        self.assertEqual(statuses[-1]['enabled_queues'],['chickadee'])
+        self.assertNotIn('applied_organization_access',statuses[-1])
+        self.assertLess(events.index('install'),len(events)-1)
+
+    def test_legacy_primary_resume_requires_current_owner(self):
+        self.legacy_primary()
+        self.entry['status']='paused'
+        self.config['scopes']['primary']['disabled']=True
+        with patch.object(m.admit,'current_organization_owner',return_value=False):
+            installs,statuses,helpers,_=self.run_reconcile()
+        self.assertEqual(installs,[])
+        self.assertEqual(helpers,[])
+        self.assertTrue(self.config['scopes']['primary']['disabled'])
+        self.assertEqual(statuses[-1]['status'],'permission-required')
+
+    def test_legacy_primary_failed_resume_remains_retryable_and_preserves_acl_metadata(self):
+        self.legacy_primary()
+        self.entry['status']='disconnected'
+        self.entry['enabled_workflow_access']='repository'
+        self.entry['enabled_workflow_path']='.github/workflows/existing.yml'
+        self.config['scopes']['primary']['disabled']=True
+        self.reject_install=True
+        with self.assertRaises(m.LiveReloadRejected):self.run_reconcile()
+        self.assertEqual(self.observed_statuses,[])
+        self.assertTrue(json.loads(self.config_path.read_text())['scopes']['primary']['disabled'])
+        self.reject_install=False
+        installs,statuses,_,_=self.run_reconcile()
+        self.assertEqual(len(installs),1)
+        self.assertEqual(statuses[-1]['status'],'active')
+        self.assertNotIn('enabled_workflow_access',statuses[-1])
+        self.assertNotIn('enabled_workflow_path',statuses[-1])
+
+    def test_legacy_primary_repository_admin_cannot_stop_organization(self):
+        self.legacy_primary()
+        self.entry['desired_state']='disconnected'
+        with patch.object(m.admit,'current_organization_owner',return_value=False):
+            installs,statuses,helpers,_=self.run_reconcile()
+        self.assertEqual(installs,[])
+        self.assertEqual(helpers,[])
+        self.assertEqual(statuses[-1]['status'],'permission-required')
+
+    def test_legacy_primary_stop_requires_members_permission(self):
+        self.legacy_primary()
+        self.entry['desired_state']='disconnected'
+        self.installation['permissions'].pop('members')
+        installs,statuses,_,_=self.run_reconcile()
+        self.assertEqual(installs,[])
+        self.assertEqual(statuses[-1]['status'],'permission-required')
+
+    def test_legacy_primary_missing_anchor_still_requires_owner(self):
+        self.legacy_primary()
+        self.entry['desired_state']='disconnected'
+        self.missing_repository=True
+        with patch.object(m.admit,'current_organization_owner',return_value=False) as owner:
+            installs,statuses,_,_=self.run_reconcile()
+        owner.assert_called_once()
+        self.assertEqual(installs,[])
+        self.assertEqual(statuses[-1]['status'],'permission-required')
+        installs,statuses,_,_=self.run_reconcile()
+        self.assert_preserved_disabled(installs[0][0])
+        self.assertEqual(statuses[-1]['status'],'disconnected')
+
+    def test_legacy_primary_suspended_stop_preserves_identity_even_without_members(self):
+        self.legacy_primary()
+        self.entry['desired_state']='disconnected'
+        self.installation['suspended_at']='fixture'
+        self.installation['permissions'].pop('members')
+        installs,statuses,_,_=self.run_reconcile()
+        self.assert_preserved_disabled(installs[0][0])
+        self.assertEqual(installs[0][1],{'https://github.com/example'})
+        self.assertEqual(statuses[-1]['status'],'disconnected')
+
+    def test_legacy_primary_wrong_installation_cannot_stop_or_report_active(self):
+        self.legacy_primary()
+        self.entry['installation_id']=99
+        for desired in ('active','disconnected'):
+            self.entry['desired_state']=desired
+            installs,statuses,helpers,_=self.run_reconcile()
+            self.assertEqual(installs,[])
+            self.assertEqual(helpers,[])
+            self.assertEqual(statuses[-1]['status'],'permission-required')
+            self.assertEqual(statuses[-1]['enabled_queues'],[])
+
+    def test_cached_legacy_primary_identity_remains_trusted_for_stop(self):
+        self.legacy_primary()
+        self.entry['desired_state']='disconnected'
+        self.assertEqual(m.configured_scope_name(self.config,self.entry),'primary')
+        self.assertTrue(m.trusted_site_entry(self.entry,False,self.config))
+        self.entry['installation_id']=99
+        self.assertFalse(m.trusted_site_entry(self.entry,False,self.config))
+
+    def test_legacy_primary_stop_revalidates_acting_owner_over_old_policy_seed(self):
+        self.legacy_primary()
+        self.entry['repository'].pop('permissions')
+        old=copy.deepcopy(self.entry)
+        old['user']={'id':99,'login':'former-manager'}
+        self.policy['managed_requests']=[old]
+        self.entry['desired_state']='disconnected'
+        with patch.object(m.admit,'current_organization_owner',return_value=True) as owner:
+            installs,statuses,_,_=self.run_reconcile()
+        self.assertEqual(owner.call_args.args[0]['user'],self.entry['user'])
+        self.assert_preserved_disabled(installs[0][0])
+        self.assertEqual(statuses[-1]['status'],'disconnected')
+        with self.assertRaises(ValueError):m.validate_scope_merge(old,self.entry,authenticated=False)
+        changed=copy.deepcopy(self.entry)
+        changed['repository']['id']=999
+        with self.assertRaises(ValueError):m.validate_scope_merge(old,changed,authenticated=True)
+
+    def test_legacy_primary_flat_active_config_remains_read_only(self):
+        self.legacy_primary()
+        primary=self.config.pop('scopes')['primary']
+        self.config.update(primary)
+        installs,statuses,helpers,_=self.run_reconcile()
+        self.assertEqual(installs,[])
+        self.assertEqual(helpers,[])
+        self.assertEqual(statuses[-1]['status'],'active')
 
     def test_missing_members_disables_active_scope_and_honors_stop_intent(self):
         del self.installation["permissions"]["members"]

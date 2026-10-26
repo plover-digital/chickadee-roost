@@ -260,6 +260,16 @@ No record is automatically broadened during upgrade; an owner must submit the
 new controls. Another currently verified organization owner can manage the same
 record, without creating a second organization scope or listener.
 
+Verified organization owners can also pause or disconnect a legacy primary
+scope without changing its repository or workflow restrictions. The bridge
+rechecks the acting owner's current membership before stopping assignments and
+reports the stopped state only after configuration acknowledgment. A disabled
+legacy primary can be explicitly resumed by a verified owner after a confirmed
+pause or disconnect, preserving its existing queues and GitHub restrictions.
+It is never automatically re-enabled after a permission or setup failure.
+Organization lifecycle controls require the browser; repository-scoped API
+tokens cannot stop or resume an organization-wide runner scope.
+
 Optional private enrollment/status JSON fields are `organization_access` (desired)
 and `applied_organization_access` (confirmed), with `repository_selection` (`all`
 or `selected`), `repository_ids` (required for selected; empty for all), and

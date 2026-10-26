@@ -84,6 +84,7 @@ func (c Choice) HasQueue(queue string) bool {
 }
 
 type Enrollment struct {
+	LifecycleOwner            bool                `json:"-"`
 	OrganizationAccess        *OrganizationAccess `json:"organization_access,omitempty"`
 	AppliedOrganizationAccess *OrganizationAccess `json:"applied_organization_access,omitempty"`
 
@@ -510,6 +511,7 @@ func (s *Server) dashboard(w http.ResponseWriter, r *http.Request) {
 	}
 	for _, entry := range s.enrollments {
 		if entry.User.ID == v.User.ID || organizationOwner(choices, entry) {
+			entry.LifecycleOwner = e == nil && organizationOwner(choices, entry)
 			authorized := false
 			if e == nil {
 				for _, choice := range choices {
@@ -520,7 +522,7 @@ func (s *Server) dashboard(w http.ResponseWriter, r *http.Request) {
 				}
 			}
 			disconnected := entry.DesiredState == "disconnected" || entry.Status == "disconnected"
-			if !authorized && e == nil && disconnected {
+			if !authorized && !entry.LifecycleOwner && e == nil && disconnected {
 				continue
 			}
 			if !authorized {
@@ -528,7 +530,9 @@ func (s *Server) dashboard(w http.ResponseWriter, r *http.Request) {
 				entry.EnabledQueues = nil
 				entry.EnabledWorkflowAccess = ""
 				entry.EnabledWorkflowPath = ""
-				if disconnected {
+				if entry.LifecycleOwner {
+					entry.Message = "Organization owner access is verified. Repository-specific setup and usage are unavailable; you can manage this service's lifecycle."
+				} else if disconnected {
 					entry.Status = "disconnected"
 					entry.Message = "GitHub access could not be verified. This disconnected service remains stored for cleanup; no runner availability is inferred."
 				} else {

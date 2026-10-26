@@ -136,11 +136,11 @@ func (s *Server) manageRequest(w http.ResponseWriter, r *http.Request, v session
 		if entry.ID != r.FormValue("id") || entry.User.ID != v.User.ID && !organizationOwner(choices, entry) {
 			continue
 		}
-		if v.AgentRepositories != nil && !agentEnrollmentAllowed(v, entry, s.enrollments) {
+		if v.AgentRepositories != nil && (entry.Account.Type == "Organization" || !agentEnrollmentAllowed(v, entry, s.enrollments)) {
 			operationError(w, r, "Service is outside this token's repository authority; use browser owner setup for organization-wide controls", 403)
 			return
 		}
-		authorized := false
+		authorized := organizationOwner(choices, entry) && (action != "active" || entry.Status == "paused" || entry.Status == "disconnected")
 		for _, choice := range choices {
 			if choice.authorizes(entry) {
 				authorized = true
@@ -153,7 +153,7 @@ func (s *Server) manageRequest(w http.ResponseWriter, r *http.Request, v session
 		}
 		entries := append([]Enrollment(nil), s.enrollments...)
 		entries[i].DesiredState = action
-		if entry.OrganizationAccess != nil {
+		if entry.OrganizationAccess != nil || entry.Account.Type == "Organization" && (action != "active" || entry.Status == "paused" || entry.Status == "disconnected") && organizationOwner(choices, entry) {
 			entries[i].User = v.User
 			entries[i].Authenticated = true
 		}
