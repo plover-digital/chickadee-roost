@@ -251,6 +251,8 @@ func run(path string, c dispatch.FleetConfig) error {
 				if exists {
 					start(q, old.client)
 				} // previous session is closed before replacement
+			} else {
+				refreshQueuePolicy(polls, demands, q)
 			}
 		}
 		for _, q := range next {

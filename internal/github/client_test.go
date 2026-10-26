@@ -249,3 +249,71 @@ func TestOversizedAvailabilityRejectedBeforeSideEffects(t *testing.T) {
 		t.Fatal("oversized batch acquired or acknowledged")
 	}
 }
+
+// A full local runner slot must not cause the next offered batch to disappear
+// when the listener acknowledges its message and polls for subsequent work.
+type backlogSession struct {
+	messages  []*scaleset.RunnerScaleSetMessage
+	acquired  []int64
+	acked     []int
+	useResult bool
+	result    []int64
+}
+
+func (s *backlogSession) GetMessage(ctx context.Context, _ int, _ int) (*scaleset.RunnerScaleSetMessage, error) {
+	if len(s.messages) == 0 {
+		return nil, errors.New("fixture complete")
+	}
+	message := s.messages[0]
+	s.messages = s.messages[1:]
+	return message, nil
+}
+func (s *backlogSession) AcquireJobs(_ context.Context, ids []int64) ([]int64, error) {
+	s.acquired = append(s.acquired, ids...)
+	if s.useResult {
+		return s.result, nil
+	}
+	return ids, nil
+}
+func (s *backlogSession) DeleteMessage(_ context.Context, id int) error {
+	if id == 1 && !reflect.DeepEqual(s.acquired, []int64{41, 42, 43}) {
+		return errors.New("acknowledged unacquired backlog")
+	}
+	s.acked = append(s.acked, id)
+	return nil
+}
+func TestFullQueuePreservesOfferedBacklogAcrossMessages(t *testing.T) {
+	s := &backlogSession{messages: []*scaleset.RunnerScaleSetMessage{
+		{MessageID: 1, Statistics: &scaleset.RunnerScaleSetStatistic{TotalAssignedJobs: 1}, JobAvailableMessages: []*scaleset.JobAvailable{
+			{JobMessageBase: scaleset.JobMessageBase{RunnerRequestID: 41}},
+			{JobMessageBase: scaleset.JobMessageBase{RunnerRequestID: 42}},
+			{JobMessageBase: scaleset.JobMessageBase{RunnerRequestID: 43}},
+		}},
+		{MessageID: 2, Statistics: &scaleset.RunnerScaleSetStatistic{TotalAssignedJobs: 3}, JobCompletedMessages: []*scaleset.JobCompleted{{RunnerName: "completed-fixture"}}},
+	}}
+	var updates []DemandStatistics
+	_ = pollMessagesStats(context.Background(), s, 1, func(d DemandStatistics) error { updates = append(updates, d); return nil })
+	if !reflect.DeepEqual(s.acquired, []int64{41, 42, 43}) || !reflect.DeepEqual(s.acked, []int{1, 2}) {
+		t.Fatalf("backlog did not survive acknowledgement: acquired=%v acked=%v", s.acquired, s.acked)
+	}
+	if len(updates) != 2 || updates[0].Assigned != 1 || updates[1].Assigned != 1 || !reflect.DeepEqual(updates[1].CompletedRunners, []string{"completed-fixture"}) {
+		t.Fatal("runner cap or completion metadata changed", updates)
+	}
+}
+
+func TestPartialAcquisitionResultStillAcknowledgesOfferedBatch(t *testing.T) {
+	// A request can be canceled or claimed between availability and acquisition.
+	// The official SDK accepts a nil-error subset and scales from statistics.
+	for _, result := range [][]int64{nil, {42}} {
+		s := &backlogSession{useResult: true, result: result, messages: []*scaleset.RunnerScaleSetMessage{{MessageID: 1, Statistics: &scaleset.RunnerScaleSetStatistic{TotalAssignedJobs: 1}, JobAvailableMessages: []*scaleset.JobAvailable{
+			{JobMessageBase: scaleset.JobMessageBase{RunnerRequestID: 41}},
+			{JobMessageBase: scaleset.JobMessageBase{RunnerRequestID: 42}},
+			{JobMessageBase: scaleset.JobMessageBase{RunnerRequestID: 43}},
+		}}}}
+		var updates []DemandStatistics
+		_ = pollMessagesStats(context.Background(), s, 1, func(d DemandStatistics) error { updates = append(updates, d); return nil })
+		if !reflect.DeepEqual(s.acquired, []int64{41, 42, 43}) || !reflect.DeepEqual(s.acked, []int{1}) || len(updates) != 1 || updates[0].Assigned != 1 {
+			t.Fatal("partial acquisition poisoned backlog or demand", result, s.acquired, s.acked, updates)
+		}
+	}
+}

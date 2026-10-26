@@ -1,6 +1,9 @@
 package fleet
 
-import "context"
+import (
+	"context"
+	"time"
+)
 
 func (b *Broker) provision(ctx context.Context, index int, worker Worker, backend Backend) error {
 	if err := ctx.Err(); err != nil {
@@ -54,6 +57,7 @@ func (b *Broker) provision(ctx context.Context, index int, worker Worker, backen
 			b.assignments[index].Phase = Uncertain
 		} else {
 			b.assignments[index].Phase = Delivered
+			b.observeIdle(a.ID, time.Now())
 		}
 		return b.persist()
 	}

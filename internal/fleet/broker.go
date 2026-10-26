@@ -23,6 +23,10 @@ type Broker struct {
 	assignments []Assignment
 	failed      bool
 	telemetry   Telemetry
+	idleSince   map[string]time.Time
+	idleChecks  map[string]idleCheck
+	lastScope   string
+	lastQueues  map[string]string
 }
 
 func (b *Broker) Assignments() []Assignment {
@@ -164,6 +168,7 @@ func (b *Broker) Sync(ctx context.Context, demands []Demand, workers map[string]
 		}
 		inventory[id] = snapshot
 	}
+	idleCandidates := []int{}
 	for i := range b.assignments {
 		a := b.assignments[i]
 		if a.Phase == Complete {
@@ -190,6 +195,7 @@ func (b *Broker) Sync(ctx context.Context, demands []Demand, workers map[string]
 		}
 		b.assignments[i].VMID = record.Request.VMID
 		if record.State == "terminal" {
+			delete(b.idleSince, a.ID)
 			if !record.Resources.Valid() {
 				continue
 			}
@@ -219,6 +225,9 @@ func (b *Broker) Sync(ctx context.Context, demands []Demand, workers map[string]
 				}
 			}
 			continue
+		}
+		if a.Phase == Delivered && record.State == "delivery_intent" {
+			idleCandidates = append(idleCandidates, i)
 		}
 		switch a.Phase {
 		case Intent:
@@ -253,9 +262,10 @@ func (b *Broker) Sync(ctx context.Context, demands []Demand, workers map[string]
 			}
 		}
 	}
-	ordered := append([]Demand(nil), demands...)
-	sort.SliceStable(ordered, func(i, j int) bool { return ordered[i].QueueID < ordered[j].QueueID })
-	for _, d := range ordered {
+	if err := b.scheduleIdleChecks(ctx, idleCandidates, backends, time.Now()); err != nil {
+		return err
+	}
+	for _, d := range b.admissionOrder(demands) {
 		if err := ctx.Err(); err != nil {
 			return err
 		}
@@ -279,6 +289,12 @@ func (b *Broker) Sync(ctx context.Context, demands []Demand, workers map[string]
 		if err := b.persist(); err != nil {
 			return err
 		}
+		// Advance fairness only after durable admission, never for a skipped queue.
+		b.lastScope = scopeKey(d.ScopeURL)
+		if b.lastQueues == nil {
+			b.lastQueues = make(map[string]string)
+		}
+		b.lastQueues[b.lastScope] = d.QueueID
 		if err := b.provision(ctx, len(b.assignments)-1, workers[choice], backends[d.QueueID]); err != nil {
 			return err
 		}

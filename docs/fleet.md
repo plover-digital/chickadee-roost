@@ -188,3 +188,60 @@ path. Candidate validation then uses `chickadee-roost -catalog ... -fleet ...
 -check`; standalone deployments retain the existing controller validator. Deploy
 this helper/policy before accepting Mac requests. No worker API fields or stored
 enrollment schema change.
+
+## Retiring idle credentialed runners
+
+A delivered runner can remain connected without receiving a job. It still counts
+against its scope's concurrency quota; `RUNNING` means listener launch rather
+than confirmed GitHub job execution. The broker now attempts ordinary GitHub
+runner deregistration after two minutes following acknowledged credential
+delivery. Recovery grants a fresh two-minute grace after authenticated worker
+observation, so slow provisioning cannot consume the listener grace. Requests
+check never-attempted and least-recently-attempted allocations first, preventing
+busy runners from monopolizing retirement attempts. Requests run in the
+background with at most two in flight, one per execution, and at
+least 30 seconds between attempts. Each uses an independent API client and a
+five-second deadline, so the pinned SDK's shared mutex cannot block scheduling.
+The broker cancels and joins those requests before releasing its state lock. It verifies the
+runner name, positive runner ID and exact scale-set ownership before deletion.
+
+The GitHub service refuses ordinary deletion while a job is assigned/running.
+That server decision handles a job starting between lookup and deletion; a
+sampled `busy=false`, guest message or low CPU usage is never retirement authority.
+This follows the upstream [ARC live-runner removal contract](https://github.com/actions/actions-runner-controller/blob/master/controllers/actions.github.com/ephemeralrunner_controller.go)
+(`removeRunnerOfLivePod`). No force-delete operation or worker termination is
+used. Busy refusals, missing registration, lost replies and GitHub outages leave
+execution ownership and capacity charged. The worker's existing job deadline
+remains the fallback if the listener does not exit after deregistration.
+
+A successful deregistration does not free quota. The runner listener must exit,
+and the authenticated worker must independently confirm process exit and disk
+cleanup. Normal terminal registration reconciliation then releases the slot.
+Credential intent is never replayed or transferred. Unknown worker identity,
+status or credential delivery is not eligible for proactive deregistration.
+
+Worker API v1, fleet configuration v1 and broker journal v1 are unchanged. The
+existing `RegistrationCheckedAt` field also records live deregistration attempts
+before the request, preserving retry throttling across broker restarts. Upgrade
+or roll back the broker using the controlled restart procedure; workers, images
+and network rules need no update. Source tests cover busy/job-start races,
+identity fencing, API failures, restart and quota retention. Live acceptance of
+idle exit and job-start races is still required before production rollout.
+Standalone controller idle draining remains tracked separately in
+[Chickadee issue 26](https://github.com/plover-digital/chickadee/issues/26).
+
+### Queue admission fairness and quota reloads
+
+Admission rotates across scopes and across queues within each scope. A
+continuous backlog on one label cannot always take a shared slot before another
+eligible label. Every admission still requires the existing scope/global/worker
+budgets and durable intent; skipping a full, incompatible or zero-demand queue
+does not advance the cursors. Cursors are in memory and reset on broker restart;
+repeated restarts can bias ordering. This is admission fairness, not binding a VM
+to a particular GitHub job or overriding GitHub workflow/repository policy.
+
+A scope quota change updates both current demand and the existing poller's
+policy even when the per-label advertised maximum is unchanged. Queue-only
+reload preserves the listener session and already allocated jobs. Lowering a
+quota never releases existing executions early; admission waits until their
+normal cleanup brings the scope under its new limit.

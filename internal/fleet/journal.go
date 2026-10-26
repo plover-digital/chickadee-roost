@@ -78,6 +78,14 @@ func (b *Broker) Close() error {
 	if b.lock == nil {
 		return nil
 	}
+	// Background requests use independent clients and do not acquire b.mu.
+	// Cancel and join them before releasing the state ownership lock.
+	for _, check := range b.idleChecks {
+		check.cancel()
+	}
+	for _, check := range b.idleChecks {
+		<-check.done
+	}
 	err := b.lock.Close()
 	b.lock = nil
 	return err

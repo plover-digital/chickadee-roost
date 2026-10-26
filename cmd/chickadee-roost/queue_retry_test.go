@@ -89,3 +89,27 @@ func TestStatusDistinguishesInitializedFromUnavailableQueues(t *testing.T) {
 		t.Fatal("unavailable queue advertised initialized")
 	}
 }
+
+func TestScopeLimitOnlyReloadPreservesSessionAndUpdatesDemand(t *testing.T) {
+	for _, limits := range [][2]int{{1, 2}, {2, 1}} {
+		old, newLimit := limits[0], limits[1]
+		q := dispatch.Queue{Key: "scope|queue", Scope: "https://github.com/example", Label: "queue", Max: 1, ScopeMax: old}
+		canceled := false
+		done := make(chan struct{})
+		client := &github.Client{SetID: 7}
+		polls := map[string]poller{q.Key: {queue: q, client: client, cancel: func() { canceled = true }, done: done}}
+		demands := map[string]fleet.Demand{q.Key: {QueueID: q.Key, ScopeURL: q.Scope, Label: q.Label, ScopeMax: old, Assigned: 1, Revision: 42}}
+		q.ScopeMax = newLimit
+		refreshQueuePolicy(polls, demands, q)
+		p := polls[q.Key]
+		if canceled || p.client != client || p.done != done || p.queue.Max != 1 {
+			t.Fatal("scope-only reload restarted listener")
+		}
+		if p.queue.ScopeMax != newLimit || demands[q.Key].ScopeMax != newLimit {
+			t.Fatal("applied scope limit remains stale")
+		}
+		if demands[q.Key].Revision != 42 || demands[q.Key].Assigned != 1 {
+			t.Fatal("policy reload changed GitHub demand")
+		}
+	}
+}
