@@ -16,17 +16,18 @@ var ErrNotFound = errors.New("assignment not found")
 var ErrUnjournaled = errors.New("worker has an unjournaled active assignment")
 
 type Broker struct {
-	mu          sync.Mutex
-	dir, id     string
-	limits      Limits
-	lock        *os.File
-	assignments []Assignment
-	failed      bool
-	telemetry   Telemetry
-	idleSince   map[string]time.Time
-	idleChecks  map[string]idleCheck
-	lastScope   string
-	lastQueues  map[string]string
+	mu                 sync.Mutex
+	dir, id            string
+	limits             Limits
+	lock               *os.File
+	assignments        []Assignment
+	failed             bool
+	telemetry          Telemetry
+	idleSince          map[string]time.Time
+	idleChecks         map[string]idleCheck
+	registrationChecks map[string]*registrationCheck
+	lastScope          string
+	lastQueues         map[string]string
 }
 
 func (b *Broker) Assignments() []Assignment {
@@ -64,6 +65,9 @@ func (b *Broker) Sync(ctx context.Context, demands []Demand, workers map[string]
 	}
 	if b.failed || b.lock == nil {
 		return errors.New("broker is not available")
+	}
+	if err := b.finishRegistrationChecks(); err != nil {
+		return err
 	}
 	scopeLimits := map[string]int{}
 	eligibleDemand := map[string]Demand{}
@@ -108,15 +112,6 @@ func (b *Broker) Sync(ctx context.Context, demands []Demand, workers map[string]
 
 	for i, a := range b.assignments {
 		if a.Phase == Complete {
-			if a.CredentialUncertain && time.Since(a.CompletedAt) <= 10*time.Minute && time.Since(a.RegistrationCheckedAt) >= 30*time.Second {
-				if backend := backends[a.QueueID]; backend != nil {
-					_ = backend.Remove(ctx, a.RunnerName)
-					b.assignments[i].RegistrationCheckedAt = time.Now().UTC()
-					if err := b.persist(); err != nil {
-						return err
-					}
-				}
-			}
 			continue
 		}
 		for _, d := range demands {
@@ -187,6 +182,13 @@ func (b *Broker) Sync(ctx context.Context, demands []Demand, workers map[string]
 				if err = b.provision(ctx, i, worker, backends[a.QueueID]); err != nil {
 					return err
 				}
+			} else if errors.Is(err, ErrNotFound) && a.Phase == Intent {
+				// Absence cannot cancel an earlier Reserve that may still be booting.
+				// Materialize its immutable, credential-free reservation so the worker
+				// deadline establishes terminal cleanup even after demand was withdrawn.
+				if err = b.establishAbandonedReservation(ctx, i, worker); err != nil {
+					return err
+				}
 			}
 			continue
 		}
@@ -213,16 +215,12 @@ func (b *Broker) Sync(ctx context.Context, demands []Demand, workers map[string]
 			if a.Phase == JITIntent {
 				b.assignments[i].CredentialUncertain = true
 			}
+			if a.Phase != Terminal {
+				b.assignments[i].RegistrationCheckedAt = time.Time{}
+			}
 			b.assignments[i].Phase = Terminal
 			if err = b.persist(); err != nil {
 				return err
-			}
-			if backend := backends[a.QueueID]; backend != nil && backend.Remove(ctx, a.RunnerName) == nil {
-				b.assignments[i].RegistrationCheckedAt = time.Now().UTC()
-				b.assignments[i].Phase = Complete
-				if err = b.persist(); err != nil {
-					return err
-				}
 			}
 			continue
 		}
@@ -262,8 +260,19 @@ func (b *Broker) Sync(ctx context.Context, demands []Demand, workers map[string]
 			}
 		}
 	}
+	if err := b.scheduleRegistrationChecks(ctx, backends, time.Now()); err != nil {
+		return err
+	}
 	if err := b.scheduleIdleChecks(ctx, idleCandidates, backends, time.Now()); err != nil {
 		return err
+	}
+	// Missing reservation records do not prove that capacity is unowned: an
+	// earlier timed-out Reserve may still be committing. Avoid binding more
+	// work to that host until authenticated inventory accounts for its intent.
+	for id, snapshot := range inventory {
+		if b.hasUnobservedAssignment(snapshot) {
+			delete(inventory, id)
+		}
 	}
 	for _, d := range b.admissionOrder(demands) {
 		if err := ctx.Err(); err != nil {
@@ -304,11 +313,34 @@ func (b *Broker) Sync(ctx context.Context, demands []Demand, workers map[string]
 			delete(inventory, choice)
 			delete(observed, choice)
 		} else {
-			inventory[choice] = fresh
 			observed[choice] = fresh
+			if b.hasUnobservedAssignment(fresh) {
+				delete(inventory, choice)
+			} else {
+				inventory[choice] = fresh
+			}
 		}
 	}
 	return nil
+}
+
+func (b *Broker) hasUnobservedAssignment(snapshot Inventory) bool {
+	for _, a := range b.assignments {
+		if a.Phase == Complete || a.Worker.WorkerID != snapshot.Identity.WorkerID {
+			continue
+		}
+		found := false
+		for _, r := range snapshot.Records {
+			if matchesRecord(a, r) {
+				found = true
+				break
+			}
+		}
+		if !found {
+			return true
+		}
+	}
+	return false
 }
 func (b *Broker) scopeBusy(scope string) bool {
 	for _, a := range b.assignments {

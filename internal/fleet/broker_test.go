@@ -188,20 +188,21 @@ func TestTerminalCleanupRegistrationRemovalBeforeQuotaRelease(t *testing.T) {
 	b, w, backend, d := fixture(t)
 	workers := map[string]Worker{"worker-a": w}
 	backends := map[string]Backend{d.QueueID: backend}
-	_ = b.Sync(context.Background(), []Demand{d}, workers, backends)
+	_ = b.syncAndCleanup(context.Background(), []Demand{d}, workers, backends)
 	a := b.assignments[0]
 	r := w.records[a.ID]
 	r.State = "terminal"
 	w.records[a.ID] = r
 	backend.removeErr = true
-	if e := b.Sync(context.Background(), nil, workers, backends); e != nil {
+	if e := b.syncAndCleanup(context.Background(), nil, workers, backends); e != nil {
 		t.Fatal(e)
 	}
 	if !b.scopeBusy(d.ScopeURL) || b.assignments[0].Phase != Terminal {
 		t.Fatal("quota released before GitHub cleanup")
 	}
 	backend.removeErr = false
-	if e := b.Sync(context.Background(), nil, workers, backends); e != nil {
+	b.assignments[0].RegistrationCheckedAt = time.Now().Add(-time.Minute)
+	if e := b.syncAndCleanup(context.Background(), nil, workers, backends); e != nil {
 		t.Fatal(e)
 	}
 	if b.scopeBusy(d.ScopeURL) || b.assignments[0].Phase != Complete {
@@ -244,21 +245,21 @@ func TestAssignedRevisionCannotReplaceCompletedRunner(t *testing.T) {
 	b, w, backend, d := fixture(t)
 	workers := map[string]Worker{"worker-a": w}
 	backends := map[string]Backend{d.QueueID: backend}
-	if e := b.Sync(context.Background(), []Demand{d}, workers, backends); e != nil {
+	if e := b.syncAndCleanup(context.Background(), []Demand{d}, workers, backends); e != nil {
 		t.Fatal(e)
 	}
 	a := b.assignments[0]
 	r := w.records[a.ID]
 	r.State = "terminal"
 	w.records[a.ID] = r
-	if e := b.Sync(context.Background(), []Demand{d}, workers, backends); e != nil {
+	if e := b.syncAndCleanup(context.Background(), []Demand{d}, workers, backends); e != nil {
 		t.Fatal(e)
 	}
 	if w.reserve != 1 {
 		t.Fatal("stale assigned snapshot spawned a replacement")
 	}
 	d.Revision = 2
-	if e := b.Sync(context.Background(), []Demand{d}, workers, backends); e != nil {
+	if e := b.syncAndCleanup(context.Background(), []Demand{d}, workers, backends); e != nil {
 		t.Fatal(e)
 	}
 	if w.reserve != 2 {
@@ -339,14 +340,14 @@ func TestWorkerTerminalTimeSurvivesLateBrokerObservation(t *testing.T) {
 	b, w, backend, d := fixture(t)
 	workers := map[string]Worker{"worker-a": w}
 	backends := map[string]Backend{d.QueueID: backend}
-	_ = b.Sync(context.Background(), []Demand{d}, workers, backends)
+	_ = b.syncAndCleanup(context.Background(), []Demand{d}, workers, backends)
 	a := b.assignments[0]
 	b.assignments[0].ReservedAt = time.Now().UTC().Add(-72 * time.Hour)
 	record := w.records[a.ID]
 	record.State = "terminal"
 	record.CompletedAt = b.assignments[0].ReservedAt.Add(time.Hour)
 	w.records[a.ID] = record
-	if e := b.Sync(context.Background(), nil, workers, backends); e != nil {
+	if e := b.syncAndCleanup(context.Background(), nil, workers, backends); e != nil {
 		t.Fatal(e)
 	}
 	if b.assignments[0].Phase != Complete || b.assignments[0].CompletedAt.Sub(b.assignments[0].ReservedAt) != time.Hour {
@@ -359,12 +360,12 @@ func TestTwoAssignedJobsDrainSeriallyWithoutDuplicateSnapshotExtras(t *testing.T
 	d.Assigned = 2
 	workers := map[string]Worker{"worker-a": w}
 	backends := map[string]Backend{d.QueueID: backend}
-	_ = b.Sync(context.Background(), []Demand{d}, workers, backends)
+	_ = b.syncAndCleanup(context.Background(), []Demand{d}, workers, backends)
 	first := b.assignments[0]
 	record := w.records[first.ID]
 	record.State = "terminal"
 	w.records[first.ID] = record
-	if e := b.Sync(context.Background(), []Demand{d}, workers, backends); e != nil {
+	if e := b.syncAndCleanup(context.Background(), []Demand{d}, workers, backends); e != nil {
 		t.Fatal(e)
 	}
 	if w.reserve != 2 {
@@ -374,7 +375,7 @@ func TestTwoAssignedJobsDrainSeriallyWithoutDuplicateSnapshotExtras(t *testing.T
 	record = w.records[second.ID]
 	record.State = "terminal"
 	w.records[second.ID] = record
-	if e := b.Sync(context.Background(), []Demand{d}, workers, backends); e != nil {
+	if e := b.syncAndCleanup(context.Background(), []Demand{d}, workers, backends); e != nil {
 		t.Fatal(e)
 	}
 	if w.reserve != 2 {
@@ -402,13 +403,13 @@ func TestUncertainCompleteRetriesLateRegistrationAfterRestart(t *testing.T) {
 	w.lostDelivery = true
 	workers := map[string]Worker{"worker-a": w}
 	backends := map[string]Backend{d.QueueID: backend}
-	_ = b.Sync(context.Background(), []Demand{d}, workers, backends)
+	_ = b.syncAndCleanup(context.Background(), []Demand{d}, workers, backends)
 	a := b.assignments[0]
 	record := w.records[a.ID]
 	record.State = "terminal"
 	record.CompletedAt = time.Now().UTC()
 	w.records[a.ID] = record
-	if e := b.Sync(context.Background(), []Demand{d}, workers, backends); e != nil {
+	if e := b.syncAndCleanup(context.Background(), []Demand{d}, workers, backends); e != nil {
 		t.Fatal(e)
 	}
 	if b.assignments[0].Phase != Complete || !b.assignments[0].CredentialUncertain || backend.remove != 1 {
@@ -427,19 +428,19 @@ func TestUncertainCompleteRetriesLateRegistrationAfterRestart(t *testing.T) {
 		t.Fatal(e)
 	}
 	defer recovered.Close()
-	if e = recovered.Sync(context.Background(), []Demand{d}, workers, backends); e != nil {
+	if e = recovered.syncAndCleanup(context.Background(), []Demand{d}, workers, backends); e != nil {
 		t.Fatal(e)
 	}
 	if backend.removedLate != 1 || backend.remove != 2 || w.reserve != 1 || w.deliver != 1 {
 		t.Fatal("delayed registration missed or VM/JIT replayed")
 	}
-	_ = recovered.Sync(context.Background(), nil, workers, backends)
+	_ = recovered.syncAndCleanup(context.Background(), nil, workers, backends)
 	if backend.remove != 2 {
 		t.Fatal("grace cleanup ignored 30-second bound")
 	}
 	recovered.assignments[0].CompletedAt = time.Now().UTC().Add(-11 * time.Minute)
 	recovered.assignments[0].RegistrationCheckedAt = time.Now().UTC().Add(-31 * time.Second)
-	_ = recovered.Sync(context.Background(), nil, workers, backends)
+	_ = recovered.syncAndCleanup(context.Background(), nil, workers, backends)
 	if backend.remove != 2 {
 		t.Fatal("cleanup continued beyond grace window")
 	}
@@ -448,14 +449,14 @@ func TestNormalCompleteDoesNotPollRegistrationAgain(t *testing.T) {
 	b, w, backend, d := fixture(t)
 	workers := map[string]Worker{"worker-a": w}
 	backends := map[string]Backend{d.QueueID: backend}
-	_ = b.Sync(context.Background(), []Demand{d}, workers, backends)
+	_ = b.syncAndCleanup(context.Background(), []Demand{d}, workers, backends)
 	a := b.assignments[0]
 	record := w.records[a.ID]
 	record.State = "terminal"
 	w.records[a.ID] = record
-	_ = b.Sync(context.Background(), nil, workers, backends)
+	_ = b.syncAndCleanup(context.Background(), nil, workers, backends)
 	b.assignments[0].RegistrationCheckedAt = time.Now().UTC().Add(-time.Minute)
-	_ = b.Sync(context.Background(), nil, workers, backends)
+	_ = b.syncAndCleanup(context.Background(), nil, workers, backends)
 	if backend.remove != 1 {
 		t.Fatal("successful credentials caused extra registration polling")
 	}
@@ -484,7 +485,7 @@ func TestPausedScopeCannotResumePrecredentialIntent(t *testing.T) {
 				}
 				workers := map[string]Worker{"worker-a": w}
 				backends := map[string]Backend{d.QueueID: backend}
-				if e := b.Sync(context.Background(), demands, workers, backends); e != nil {
+				if e := b.syncAndCleanup(context.Background(), demands, workers, backends); e != nil {
 					t.Fatal(e)
 				}
 				if backend.jit != 0 || w.deliver != 0 || w.seal != 0 {
@@ -493,7 +494,7 @@ func TestPausedScopeCannotResumePrecredentialIntent(t *testing.T) {
 				record.State = "terminal"
 				record.CompletedAt = time.Now().UTC()
 				w.records[a.ID] = record
-				if e := b.Sync(context.Background(), demands, workers, backends); e != nil {
+				if e := b.syncAndCleanup(context.Background(), demands, workers, backends); e != nil {
 					t.Fatal(e)
 				}
 				if b.assignments[0].Phase != Complete || backend.remove != 1 {
@@ -521,7 +522,7 @@ func TestGithubCompletionReleasesSnapshotCreditForNewPendingJob(t *testing.T) {
 	b, w, backend, d := fixture(t)
 	workers := map[string]Worker{"worker-a": w}
 	backends := map[string]Backend{d.QueueID: backend}
-	if e := b.Sync(context.Background(), []Demand{d}, workers, backends); e != nil {
+	if e := b.syncAndCleanup(context.Background(), []Demand{d}, workers, backends); e != nil {
 		t.Fatal(e)
 	}
 	old := b.assignments[0]
@@ -529,7 +530,7 @@ func TestGithubCompletionReleasesSnapshotCreditForNewPendingJob(t *testing.T) {
 	// while the old VM still needs process/disk cleanup.
 	d.Revision = 2
 	d.CompletedRunners = []string{old.RunnerName}
-	if e := b.Sync(context.Background(), []Demand{d}, workers, backends); e != nil {
+	if e := b.syncAndCleanup(context.Background(), []Demand{d}, workers, backends); e != nil {
 		t.Fatal(e)
 	}
 	if w.reserve != 1 {
@@ -539,13 +540,13 @@ func TestGithubCompletionReleasesSnapshotCreditForNewPendingJob(t *testing.T) {
 	record.State = "terminal"
 	record.CompletedAt = time.Now().UTC()
 	w.records[old.ID] = record
-	if e := b.Sync(context.Background(), []Demand{d}, workers, backends); e != nil {
+	if e := b.syncAndCleanup(context.Background(), []Demand{d}, workers, backends); e != nil {
 		t.Fatal(e)
 	}
 	if w.reserve != 2 || b.assignments[0].GitHubCompletedRevision != 2 {
 		t.Fatal("old completed runner consumed the new job snapshot")
 	}
-	if e := b.Sync(context.Background(), []Demand{d}, workers, backends); e != nil {
+	if e := b.syncAndCleanup(context.Background(), []Demand{d}, workers, backends); e != nil {
 		t.Fatal(e)
 	}
 	if w.reserve != 2 {
@@ -566,5 +567,31 @@ func TestRunnerCompletionMetadataCannotCrossQueue(t *testing.T) {
 	_ = b.Sync(context.Background(), []Demand{d, other}, workers, backends)
 	if b.assignments[0].GitHubCompletedRevision != 0 {
 		t.Fatal("completion metadata crossed queue boundary")
+	}
+}
+
+// Existing lifecycle tests settle the asynchronous cleanup they initiate before
+// asserting their final state. Concurrency regressions use Sync directly.
+func (b *Broker) syncAndCleanup(ctx context.Context, demands []Demand, workers map[string]Worker, backends map[string]Backend) error {
+	for {
+		if err := b.Sync(ctx, demands, workers, backends); err != nil {
+			return err
+		}
+		b.mu.Lock()
+		checks := make([]*registrationCheck, 0, len(b.registrationChecks))
+		for _, check := range b.registrationChecks {
+			checks = append(checks, check)
+		}
+		b.mu.Unlock()
+		if len(checks) == 0 {
+			return nil
+		}
+		for _, check := range checks {
+			select {
+			case <-check.done:
+			case <-ctx.Done():
+				return ctx.Err()
+			}
+		}
 	}
 }

@@ -3,6 +3,7 @@ package github
 import (
 	"context"
 	"errors"
+	"fmt"
 	"github.com/hashicorp/go-retryablehttp"
 	"net"
 	"net/http"
@@ -97,35 +98,46 @@ func offlineRemovalClient(t *testing.T, dial func(context.Context, string, strin
 	}
 	return client
 }
-func TestIdleRetirementDeadlineIsIndependentOfListenerSDKMutex(t *testing.T) {
-	entered := make(chan struct{})
-	release := make(chan struct{})
-	mainDone := make(chan struct{})
-	mainAPI := offlineRemovalClient(t, func(ctx context.Context, _, _ string) (net.Conn, error) {
-		close(entered)
-		<-release
-		return nil, errors.New("offline fixture")
-	})
-	go func() { defer close(mainDone); _, _ = mainAPI.GetRunnerScaleSet(context.Background(), 1, "queue") }()
-	defer func() { close(release); <-mainDone }()
-	select {
-	case <-entered:
-	case <-time.After(time.Second):
-		t.Fatal("main API did not acquire SDK mutex")
-	}
-	c := &Client{API: mainAPI, SetID: 7, newRetirementAPI: func() (runnerRemovalAPI, error) {
-		return offlineRemovalClient(t, func(ctx context.Context, _, _ string) (net.Conn, error) { <-ctx.Done(); return nil, ctx.Err() }), nil
-	}}
-	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Millisecond)
-	defer cancel()
-	retired := make(chan error, 1)
-	go func() { retired <- c.RetireIdle(ctx, "owned") }()
-	select {
-	case err := <-retired:
-		if err == nil {
-			t.Fatal("canceled retirement reported success")
-		}
-	case <-time.After(time.Second):
-		t.Fatal("retirement waited on the listener SDK mutex past its deadline")
+func TestRemovalDeadlineIsIndependentOfListenerSDKMutex(t *testing.T) {
+	for _, terminal := range []bool{false, true} {
+		t.Run(fmt.Sprint("terminal=", terminal), func(t *testing.T) {
+			entered := make(chan struct{})
+			release := make(chan struct{})
+			mainDone := make(chan struct{})
+			mainAPI := offlineRemovalClient(t, func(ctx context.Context, _, _ string) (net.Conn, error) {
+				close(entered)
+				<-release
+				return nil, errors.New("offline fixture")
+			})
+			go func() { defer close(mainDone); _, _ = mainAPI.GetRunnerScaleSet(context.Background(), 1, "queue") }()
+			defer func() { close(release); <-mainDone }()
+			select {
+			case <-entered:
+			case <-time.After(time.Second):
+				t.Fatal("main API did not acquire SDK mutex")
+			}
+			c := &Client{API: mainAPI, SetID: 7, newRetirementAPI: func() (runnerRemovalAPI, error) {
+				return offlineRemovalClient(t, func(ctx context.Context, _, _ string) (net.Conn, error) { <-ctx.Done(); return nil, ctx.Err() }), nil
+			}}
+			ctx, cancel := context.WithTimeout(context.Background(), 20*time.Millisecond)
+			defer cancel()
+			retired := make(chan error, 1)
+			go func() {
+				if terminal {
+					retired <- c.Remove(ctx, "owned")
+				} else {
+					retired <- c.RetireIdle(ctx, "owned")
+				}
+			}()
+			select {
+			case err := <-retired:
+				if err == nil {
+					t.Fatal("canceled retirement reported success")
+				}
+			case <-time.After(time.Second):
+				t.Fatal("retirement waited on the listener SDK mutex past its deadline")
+			}
+
+		})
 	}
 }

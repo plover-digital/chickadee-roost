@@ -86,6 +86,12 @@ func (b *Broker) Close() error {
 	for _, check := range b.idleChecks {
 		<-check.done
 	}
+	for _, check := range b.registrationChecks {
+		check.cancel()
+	}
+	for _, check := range b.registrationChecks {
+		<-check.done
+	}
 	err := b.lock.Close()
 	b.lock = nil
 	return err
