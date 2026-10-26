@@ -266,7 +266,9 @@ rechecks the acting owner's current membership before stopping assignments and
 reports the stopped state only after configuration acknowledgment. A disabled
 legacy primary can be explicitly resumed by a verified owner after a confirmed
 pause or disconnect, preserving its existing queues and GitHub restrictions.
-It is never automatically re-enabled after a permission or setup failure.
+It resumes only a persisted explicit request with freshly verified authority.
+A failed resume check preserves the applied stopped state and requested intent
+so reconciliation can retry after access returns.
 Organization lifecycle controls require the browser; repository-scoped API
 tokens cannot stop or resume an organization-wide runner scope.
 

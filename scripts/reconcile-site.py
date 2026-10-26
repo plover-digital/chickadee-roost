@@ -569,7 +569,10 @@ def main():
             if lookup_installation and str(err)=='GitHub setup API returned HTTP 404':revoked=True;installation_revoked=True
             else:raise
         if legacy_primary and not installation_revoked and (members_missing or admin_missing):
-            if entry.get('id'):updates.append({'id':entry['id'],'status':'permission-required','enabled_queues':[],'message':'Organization owner access and the App Members read permission are required to manage the operator-managed organization.'})
+            # A rejected resume does not change the already applied stopped
+            # state. Retain it so restored authority can retry the intent.
+            blocked_status=entry['status'] if legacy_resume and existing.get('disabled') else 'permission-required'
+            if entry.get('id'):updates.append({'id':entry['id'],'status':blocked_status,'enabled_queues':[],'message':'Organization owner access and the App Members read permission are required to manage the operator-managed organization.'})
             continue
         if revoked or desired!='active':
             old=candidate.get('scopes',{}).get(name)
@@ -578,7 +581,7 @@ def main():
             elif old:
                 if installation_revoked and not old.get('disabled'):quarantine.add(old['github_url'].lower().rstrip('/'))
                 old['disabled']=True
-            status=desired if desired!='active' else 'permission-required'
+            status=desired if desired!='active' else entry['status'] if legacy_resume else 'permission-required'
             message=('Approve the App Members read permission to verify organization owner access.' if members_missing else 'The requesting user must currently own the organization; restore access and retry.' if admin_missing and entry.get('organization_access') is not None else 'The signup user must currently have admin access to the selected repository; restore access and retry.' if admin_missing else 'GitHub access removed, suspended, or awaiting permission approval.') if revoked else 'New assignments stopped; running jobs finished before applying this state.'
         elif legacy_resume:
             # Explicit resume of a confirmed stopped service restores only its

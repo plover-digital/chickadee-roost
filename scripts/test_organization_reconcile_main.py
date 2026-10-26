@@ -259,6 +259,42 @@ class OrganizationReconcileMain(unittest.TestCase):
         self.assertEqual(installs,[])
         self.assertEqual(helpers,[])
         self.assertTrue(self.config['scopes']['primary']['disabled'])
+        self.assertEqual(statuses[-1]['status'],'paused')
+
+    def test_legacy_resume_authority_failure_preserves_stopped_state_for_retry(self):
+        config,entry,policy,installation=copy.deepcopy((self.config,self.entry,self.policy,self.installation))
+        for stopped in ('paused','disconnected'):
+            for failure in ('owner','members','suspension'):
+                for missing_anchor in (False,True):
+                    with self.subTest(stopped=stopped,failure=failure,missing_anchor=missing_anchor):
+                        self.config,self.entry,self.policy,self.installation=copy.deepcopy((config,entry,policy,installation))
+                        self.legacy_primary()
+                        self.entry['status']=stopped
+                        self.config['scopes']['primary']['disabled']=True
+                        self.missing_repository=missing_anchor
+                        if failure=='members':self.installation['permissions'].pop('members')
+                        if failure=='suspension':self.installation['suspended_at']='fixture'
+                        with patch.object(m.admit,'current_organization_owner',return_value=failure!='owner'):
+                            installs,statuses,helpers,_=self.run_reconcile()
+                        self.assertEqual(installs,[])
+                        self.assertEqual(helpers,[])
+                        self.assertEqual(statuses[-1]['status'],stopped)
+                        self.assertEqual(statuses[-1]['enabled_queues'],[])
+                        self.assertTrue(self.config['scopes']['primary']['disabled'])
+                        self.entry.update(status=statuses[-1]['status'],enabled_queues=statuses[-1]['enabled_queues'])
+                        self.installation=copy.deepcopy(installation)
+                        installs,statuses,helpers,_=self.run_reconcile()
+                        self.assertEqual(len(installs),1)
+                        self.assertNotIn('disabled',self.config['scopes']['primary'])
+                        self.assertEqual(statuses[-1]['status'],'active')
+                        self.assertEqual(helpers,[])
+
+    def test_failed_resume_does_not_claim_stopped_when_config_is_enabled(self):
+        self.legacy_primary()
+        self.entry['status']='paused'
+        with patch.object(m.admit,'current_organization_owner',return_value=False):
+            installs,statuses,_,_=self.run_reconcile()
+        self.assertEqual(installs,[])
         self.assertEqual(statuses[-1]['status'],'permission-required')
 
     def test_legacy_primary_failed_resume_remains_retryable_and_preserves_acl_metadata(self):
