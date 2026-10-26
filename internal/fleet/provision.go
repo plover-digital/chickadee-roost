@@ -44,7 +44,9 @@ func (b *Broker) provision(ctx context.Context, index int, worker Worker, backen
 		if err = b.persist(); err != nil {
 			return err
 		}
-		jit, err := backend.JIT(ctx, a.RunnerName)
+		jitCtx, cancelJIT := context.WithTimeout(ctx, 5*time.Second)
+		jit, err := backend.JIT(jitCtx, a.RunnerName)
+		cancelJIT()
 		if err != nil || jit == "" {
 			b.assignments[index].CredentialUncertain = true
 			b.assignments[index].Phase = Uncertain
@@ -70,4 +72,19 @@ func (b *Broker) Drain(ctx context.Context, worker Worker) error {
 	b.mu.Lock()
 	defer b.mu.Unlock()
 	return worker.Drain(ctx)
+}
+
+// establishAbandonedReservation reconciles durable reservation intent without
+// starting credential intent. A missing record is only a point-in-time sample:
+// an earlier timed-out Reserve may still complete. The idempotent original
+// reservation gives either request the same worker-owned expiry and cleanup.
+func (b *Broker) establishAbandonedReservation(ctx context.Context, index int, worker Worker) error {
+	a := b.assignments[index]
+	record, err := worker.Reserve(ctx, a.ID, a.WorkerProfileID, a.Profile.Digest)
+	if err != nil || !matchesRecord(a, record) || record.State != "reserved" {
+		return nil
+	}
+	b.assignments[index].VMID = record.Request.VMID
+	b.assignments[index].Phase = Reserved
+	return b.persist()
 }

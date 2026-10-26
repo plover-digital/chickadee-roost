@@ -75,7 +75,10 @@ Worker inventory/status calls have short deadlines so an unavailable host does
 not hold every admission pass for the generic HTTP timeout. Cold reserve calls
 can time out while a guest continues booting; the broker retries only after a
 definitive missing-assignment status and never replays credential delivery.
-GitHub JIT calls remain bounded and serialized in this prototype.
+GitHub JIT calls remain serialized in this prototype, with a five-second deadline
+covering authentication and configuration generation. Each attempt uses an
+independent API client with retries disabled; an ambiguous failure retains
+uncertain quota and never replays credential intent.
 
 ## Read-only administrator counts
 
@@ -245,3 +248,38 @@ policy even when the per-label advertised maximum is unchanged. Queue-only
 reload preserves the listener session and already allocated jobs. Lowering a
 quota never releases existing executions early; admission waits until their
 normal cleanup brings the scope under its new limit.
+
+## Convergence during slow operations
+
+Demand observations are coalesced by queue rather than replayed from a global
+FIFO. Before every reconciliation, the broker consumes the latest observation
+for every queue. Runner completion identities survive count replacement within
+the existing bounded completion window. Listener generations fence removed or
+replaced queues, and observation times prevent an older periodic read from
+replacing a newer listener count. Serial periodic reads use a dedicated API
+client and a five-second deadline, so listener acquisition cannot hold their
+SDK mutex. A slow worker or GitHub operation can delay a pass, but it must not create a growing queue of historical scaling decisions.
+
+Terminal registration cleanup runs separately from admission, with two in-flight
+requests, independent GitHub clients, five-second deadlines and persisted
+30-second retry bounds. Terminal executions precede delayed-registration checks
+for uncertain completed executions. Successful guarded removal is applied by a
+later reconciliation; terminal quota remains charged until then. Shutdown cancels
+and joins cleanup before releasing journal ownership. Worker exit and disk
+cleanup remain mandatory, and registration cleanup never force-removes a busy
+runner.
+
+A missing worker record is not proof that a timed-out reservation cannot still
+commit. Workers with outstanding assignments absent from authenticated inventory
+are excluded from new placement while their capacity remains charged. This
+prevents multiple durable intents from claiming the same apparently free slot.
+Other authenticated workers may continue serving eligible demand.
+
+If a credential-free reservation intent never materialized and its demand was
+withdrawn, the broker idempotently establishes the original reservation without
+sealing it or requesting credentials. The worker's ordinary reservation deadline
+then provides process-exit and disk-cleanup proof. It does not infer cancellation
+from a 404, release quota early, replay credentials or change the reserved
+profile. Missing hosts, identity changes or failed reservation recovery retain
+quota until authoritative reconciliation is possible. Worker profile/generation
+changes still require resolving outstanding assignments first.

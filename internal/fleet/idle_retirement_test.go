@@ -34,7 +34,7 @@ func TestOverdueIdleRunnerRetainsQuotaUntilWorkerCleanup(t *testing.T) {
 	other.QueueID = "scope|other"
 	other.Label = "other"
 	backends := map[string]Backend{d.QueueID: backend, other.QueueID: backend}
-	if err := b.Sync(context.Background(), []Demand{d}, workers, backends); err != nil {
+	if err := b.syncAndCleanup(context.Background(), []Demand{d}, workers, backends); err != nil {
 		t.Fatal(err)
 	}
 	old := b.assignments[0]
@@ -42,7 +42,7 @@ func TestOverdueIdleRunnerRetainsQuotaUntilWorkerCleanup(t *testing.T) {
 	b.idleSince[b.assignments[0].ID] = time.Now().Add(-3 * time.Minute)
 	d.Assigned = 0
 	d.Revision++
-	if err := b.Sync(context.Background(), []Demand{d, other}, workers, backends); err != nil {
+	if err := b.syncAndCleanup(context.Background(), []Demand{d, other}, workers, backends); err != nil {
 		t.Fatal(err)
 	}
 	waitIdleChecks(t, b)
@@ -55,7 +55,7 @@ func TestOverdueIdleRunnerRetainsQuotaUntilWorkerCleanup(t *testing.T) {
 	if b.assignments[0].Phase != Delivered {
 		t.Fatal("deregistration changed durable execution ownership")
 	}
-	if err := b.Sync(context.Background(), []Demand{d, other}, workers, backends); err != nil {
+	if err := b.syncAndCleanup(context.Background(), []Demand{d, other}, workers, backends); err != nil {
 		t.Fatal(err)
 	}
 	waitIdleChecks(t, b)
@@ -66,7 +66,7 @@ func TestOverdueIdleRunnerRetainsQuotaUntilWorkerCleanup(t *testing.T) {
 	r.State = "terminal"
 	r.CompletedAt = time.Now().UTC()
 	w.records[old.ID] = r
-	if err := b.Sync(context.Background(), []Demand{d, other}, workers, backends); err != nil {
+	if err := b.syncAndCleanup(context.Background(), []Demand{d, other}, workers, backends); err != nil {
 		t.Fatal(err)
 	}
 	if w.reserve != 2 {

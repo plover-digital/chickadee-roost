@@ -37,6 +37,7 @@ type update struct {
 	n          int
 	generation uint64
 	completed  []string
+	observedAt time.Time
 }
 
 func main() {
@@ -88,7 +89,7 @@ func run(path string, c dispatch.FleetConfig) error {
 		}
 		workers[w.Identity.WorkerID] = dispatch.RemoteWorker{Client: client, Priority: w.PlacementPriority}
 	}
-	values := make(chan update, 256)
+	values := newDemandUpdates()
 	polls := map[string]poller{}
 	backends := map[string]fleet.Backend{}
 	demands := map[string]fleet.Demand{}
@@ -116,6 +117,7 @@ func run(path string, c dispatch.FleetConfig) error {
 	}
 	gens := map[string]uint64{}
 	revisions := map[string]uint64{}
+	observed := map[string]time.Time{}
 	for _, a := range broker.Assignments() {
 		if a.LastDemandRevision > revisions[a.QueueID] {
 			revisions[a.QueueID] = a.LastDemandRevision
@@ -140,6 +142,7 @@ func run(path string, c dispatch.FleetConfig) error {
 		generation++
 		g := generation
 		gens[q.Key] = g
+		observed[q.Key] = time.Time{}
 		pc, stop := context.WithCancel(ctx)
 		done := make(chan struct{})
 		polls[q.Key] = poller{q, client, stop, done}
@@ -159,11 +162,7 @@ func run(path string, c dispatch.FleetConfig) error {
 						stats, err := client.Statistics(sc)
 						stop()
 						if err == nil {
-							select {
-							case values <- update{key: q.Key, n: stats.Assigned, generation: g}:
-							case <-pc.Done():
-								return
-							}
+							values.publish(update{key: q.Key, n: stats.Assigned, generation: g, observedAt: stats.ObservedAt})
 						}
 					}
 				}
@@ -181,7 +180,7 @@ func run(path string, c dispatch.FleetConfig) error {
 					}
 					slog.Warn("Queue listener retry; existing worker jobs preserved")
 					select {
-					case out <- github.DemandStatistics{}:
+					case out <- github.DemandStatistics{ObservedAt: time.Now()}:
 					case <-pc.Done():
 						return
 					}
@@ -198,12 +197,7 @@ func run(path string, c dispatch.FleetConfig) error {
 			for {
 				select {
 				case n := <-out:
-					select {
-					case values <- update{key: q.Key, n: n.Assigned, generation: g, completed: n.CompletedRunners}:
-					case <-pc.Done():
-						<-finished
-						return
-					}
+					values.publish(update{key: q.Key, n: n.Assigned, generation: g, completed: n.CompletedRunners, observedAt: n.ObservedAt})
 				case <-finished:
 					return
 				case <-pc.Done():
@@ -306,27 +300,12 @@ func run(path string, c dispatch.FleetConfig) error {
 				_ = acknowledge(c.StatusDir, hash, "rejected")
 				slog.Warn("Queue reload rejected; existing assignments preserved")
 			}
-		case v := <-values:
-			p, exists := polls[v.key]
-			if !exists || gens[v.key] != v.generation {
-				continue
-			}
-			q := p.queue
-			d := demands[v.key]
-			revisions[v.key]++
-			d.Revision = revisions[v.key]
-			d.QueueID = q.Key
-			d.ScopeURL = q.Scope
-			d.Label = q.Label
-			d.ScopeMax = q.ScopeMax
-			d.Assigned = max(0, min(v.n, q.Max))
-			d.CompletedRunners = append(d.CompletedRunners, v.completed...)
-			if len(d.CompletedRunners) > 256 {
-				d.CompletedRunners = d.CompletedRunners[len(d.CompletedRunners)-256:]
-			}
-			d.Profile = fleet.Profile{Digest: q.ImageDigest, Machine: q.Machine, CPUs: q.CPUs, MemoryMiB: q.MemoryMiB, DiskGiB: q.DiskGiB}
-			demands[v.key] = d
+		case <-values.ready:
+			applyDemandUpdates(values.take(), polls, gens, demands, revisions, observed)
 		case <-tick.C:
+			// Reconciliation can take longer than a tick. Always consume the latest
+			// observations first, even when the tick wins over the notification.
+			applyDemandUpdates(values.take(), polls, gens, demands, revisions, observed)
 			if !draining {
 				for _, retry := range retries {
 					if !time.Now().Before(retry.Next) {

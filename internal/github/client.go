@@ -20,6 +20,8 @@ type Client struct {
 	SetName          string
 	NativeMac        bool
 	newRetirementAPI func() (runnerRemovalAPI, error)
+	newJITAPI        func() (jitAPI, error)
+	statisticsAPI    statisticsAPI
 }
 
 // Actions cache archives paths relative to GITHUB_WORKSPACE. Match the hosted
@@ -102,20 +104,42 @@ func initialize(c dispatch.Queue) (*Client, error) {
 	if e != nil {
 		return nil, fmt.Errorf("App client initialization failed")
 	}
-	return &Client{API: api, GroupID: c.RunnerGroupID, SetName: c.ScaleSet, NativeMac: c.Machine == "apple-vz", newRetirementAPI: func() (runnerRemovalAPI, error) {
+	// Periodic reads have one caller per queue and a dedicated SDK mutex.
+	statsAPI, e := scaleset.NewClientWithGitHubApp(appConfig, scaleset.WithTimeout(5*time.Second), scaleset.WithRetryMax(0))
+	if e != nil {
+		return nil, fmt.Errorf("statistics client initialization failed")
+	}
+	return &Client{API: api, statisticsAPI: statsAPI, GroupID: c.RunnerGroupID, SetName: c.ScaleSet, NativeMac: c.Machine == "apple-vz", newRetirementAPI: func() (runnerRemovalAPI, error) {
 		// The pinned SDK takes a context-unaware mutex around API requests. Use
 		// a fresh client per retirement so session/statistics/JIT calls cannot
 		// hold its mutex beyond the retirement request's deadline.
 		return scaleset.NewClientWithGitHubApp(appConfig, scaleset.WithTimeout(5*time.Second), scaleset.WithRetryMax(0))
+	}, newJITAPI: func() (jitAPI, error) {
+		return scaleset.NewClientWithGitHubApp(appConfig, scaleset.WithTimeout(5*time.Second), scaleset.WithRetryMax(0))
 	}}, nil
 }
 
+type jitAPI interface {
+	GenerateJitRunnerConfig(context.Context, *scaleset.RunnerScaleSetJitRunnerSetting, int) (*scaleset.RunnerScaleSetJitRunnerConfig, error)
+}
+
 func (c *Client) JIT(ctx context.Context, name string) (string, error) {
+	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
+	defer cancel()
+	if c.newJITAPI == nil {
+		return "", fmt.Errorf("JIT client unavailable")
+	}
+	// Fresh clients keep authentication and JIT outside the listener SDK mutex.
+	// This non-idempotent call is never retried, including an ambiguous timeout.
+	api, err := c.newJITAPI()
+	if err != nil {
+		return "", fmt.Errorf("JIT client unavailable")
+	}
 	workFolder := runnerWorkFolder
 	if c.NativeMac {
 		workFolder = "/Users/runner/work"
 	}
-	j, e := c.API.GenerateJitRunnerConfig(ctx, &scaleset.RunnerScaleSetJitRunnerSetting{Name: name, WorkFolder: workFolder}, c.SetID)
+	j, e := api.GenerateJitRunnerConfig(ctx, &scaleset.RunnerScaleSetJitRunnerSetting{Name: name, WorkFolder: workFolder}, c.SetID)
 	if e != nil || j == nil || j.EncodedJITConfig == "" {
 		return "", fmt.Errorf("JIT generation failed")
 	}
@@ -137,7 +161,7 @@ func (c *Client) RetireIdle(ctx context.Context, name string) error {
 }
 
 func (c *Client) Remove(ctx context.Context, name string) error {
-	return removeOwnedRunner(ctx, c.API, c.SetID, name)
+	return c.RetireIdle(ctx, name)
 }
 
 type runnerRemovalAPI interface {
@@ -196,19 +220,33 @@ type messageSession interface {
 	DeleteMessage(context.Context, int) error
 }
 
+// ObservedAt orders local observations, including reads that finish after newer
+// listener messages. A statistics read uses its request start time.
 type DemandStatistics struct {
+	ObservedAt       time.Time
 	Assigned         int
 	CompletedRunners []string
 }
 
+type statisticsAPI interface {
+	GetRunnerScaleSet(context.Context, int, string) (*scaleset.RunnerScaleSet, error)
+}
+
 func (c *Client) Statistics(ctx context.Context) (DemandStatistics, error) {
-	set, err := c.API.GetRunnerScaleSet(ctx, c.GroupID, c.SetName)
+	observedAt := time.Now()
+	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
+	defer cancel()
+	if c.statisticsAPI == nil {
+		return DemandStatistics{}, fmt.Errorf("statistics client unavailable")
+	}
+	set, err := c.statisticsAPI.GetRunnerScaleSet(ctx, c.GroupID, c.SetName)
 	if err != nil || set == nil || set.ID != c.SetID || set.Statistics == nil {
 		return DemandStatistics{}, fmt.Errorf("scale-set statistics unavailable")
 	}
-	return DemandStatistics{Assigned: maxInt(0, set.Statistics.TotalAssignedJobs)}, nil
+	return DemandStatistics{Assigned: maxInt(0, set.Statistics.TotalAssignedJobs), ObservedAt: observedAt}, nil
 }
 func (c *Client) PollStatistics(ctx context.Context, owner string, max int, desired chan<- DemandStatistics) error {
+	observedAt := time.Now()
 	session, err := c.API.MessageSessionClient(ctx, c.SetID, owner)
 	if err != nil {
 		return fmt.Errorf("message session creation failed")
@@ -219,6 +257,9 @@ func (c *Client) PollStatistics(ctx context.Context, owner string, max int, desi
 		_ = session.Close(closeCtx)
 	}()
 	emit := func(s DemandStatistics) error {
+		if s.ObservedAt.IsZero() {
+			s.ObservedAt = time.Now()
+		}
 		select {
 		case desired <- s:
 			return nil
@@ -230,7 +271,7 @@ func (c *Client) PollStatistics(ctx context.Context, owner string, max int, desi
 	if stats := session.Session().Statistics; stats != nil {
 		n = stats.TotalAssignedJobs
 	}
-	if err = emit(DemandStatistics{Assigned: min(max, maxInt(0, n))}); err != nil {
+	if err = emit(DemandStatistics{Assigned: min(max, maxInt(0, n)), ObservedAt: observedAt}); err != nil {
 		return err
 	}
 	return pollMessagesStats(ctx, session, max, emit)
@@ -273,7 +314,7 @@ func pollMessagesStats(ctx context.Context, session messageSession, max int, emi
 			ids = append(ids, j.RunnerRequestID)
 		}
 		if m.Statistics != nil {
-			stats := DemandStatistics{Assigned: min(max, maxInt(0, m.Statistics.TotalAssignedJobs))}
+			stats := DemandStatistics{Assigned: min(max, maxInt(0, m.Statistics.TotalAssignedJobs)), ObservedAt: time.Now()}
 			for _, j := range m.JobCompletedMessages {
 				if j != nil && j.RunnerName != "" && len(j.RunnerName) <= 100 && len(stats.CompletedRunners) < 50 {
 					stats.CompletedRunners = append(stats.CompletedRunners, j.RunnerName)

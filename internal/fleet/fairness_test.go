@@ -25,7 +25,7 @@ func TestContinuousBacklogDoesNotStarveOtherQueuesOrScopes(t *testing.T) {
 			for cycle := 0; cycle < 10; cycle++ {
 				a.Revision = uint64(cycle + 1)
 				z.Revision = a.Revision
-				if err := b.Sync(context.Background(), []Demand{z, a}, workers, backends); err != nil {
+				if err := b.syncAndCleanup(context.Background(), []Demand{z, a}, workers, backends); err != nil {
 					t.Fatal(err)
 				}
 				if len(b.assignments) != cycle+1 {
@@ -84,13 +84,13 @@ func TestLoweredScopeQuotaRetainsExistingJobsAndBlocksNewAdmission(t *testing.T)
 	workers := map[string]Worker{"worker-a": w}
 	backends := map[string]Backend{d.QueueID: backend}
 	for i := 0; i < 2; i++ {
-		if err := b.Sync(context.Background(), []Demand{d}, workers, backends); err != nil {
+		if err := b.syncAndCleanup(context.Background(), []Demand{d}, workers, backends); err != nil {
 			t.Fatal(err)
 		}
 	}
 	d.ScopeMax = 1
 	d.Revision++
-	if err := b.Sync(context.Background(), []Demand{d}, workers, backends); err != nil {
+	if err := b.syncAndCleanup(context.Background(), []Demand{d}, workers, backends); err != nil {
 		t.Fatal(err)
 	}
 	if w.reserve != 2 || w.deliver != 2 || backend.remove != 0 || b.scopeCount(d.ScopeURL) != 2 {
@@ -101,7 +101,7 @@ func TestLoweredScopeQuotaRetainsExistingJobsAndBlocksNewAdmission(t *testing.T)
 	r.State = "terminal"
 	r.CompletedAt = time.Now().UTC()
 	w.records[a.ID] = r
-	if err := b.Sync(context.Background(), []Demand{d}, workers, backends); err != nil {
+	if err := b.syncAndCleanup(context.Background(), []Demand{d}, workers, backends); err != nil {
 		t.Fatal(err)
 	}
 	if w.reserve != 2 || b.scopeCount(d.ScopeURL) != 1 {

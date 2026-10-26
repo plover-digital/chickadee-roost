@@ -54,7 +54,9 @@ type Worker interface {
 }
 
 // Backend owns one GitHub scope/queue. Remove is idempotent and reconciles by the
-// durable runner name even when a JIT response was lost.
+// durable runner name even when a JIT response was lost. Remove may run
+// concurrently with JIT and must honor context cancellation independently of
+// listener or credential-generation locks.
 type Backend interface {
 	JIT(context.Context, string) (string, error)
 	Remove(context.Context, string) error
