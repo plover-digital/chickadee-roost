@@ -80,8 +80,17 @@ func (s *Server) createAgentToken(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "GitHub access could not be verified", 502)
 		return
 	}
+	coverage := r.PostForm.Get("repository_access")
+	if coverage != "" && coverage != "selected" && coverage != "all" || len(r.PostForm["repository_access"]) > 1 {
+		http.Error(w, "Choose full account or specific repositories", 400)
+		return
+	}
+	allRepositories := coverage == "all"
 	selected := r.PostForm["repository_id"]
-	if len(selected) == 0 || len(selected) > 500 {
+	if allRepositories {
+		selected = nil
+	}
+	if !allRepositories && len(selected) == 0 || len(selected) > 500 {
 		http.Error(w, "Select at least one repository", 400)
 		return
 	}
@@ -103,7 +112,7 @@ func (s *Server) createAgentToken(w http.ResponseWriter, r *http.Request) {
 		ids = append(ids, id)
 		seen[id] = true
 	}
-	raw, err := s.agentVault.create(sid, v, name, scope, ids, time.Duration(days)*24*time.Hour)
+	raw, err := s.agentVault.create(sid, v, name, scope, ids, time.Duration(days)*24*time.Hour, allRepositories)
 	if err != nil {
 		http.Error(w, err.Error(), 409)
 		return
@@ -155,10 +164,14 @@ func decodeAgentJSON(w http.ResponseWriter, r *http.Request, value any) bool {
 		apiError(w, 415, "unsupported_media_type", "Use application/json")
 		return false
 	}
-	decoder := json.NewDecoder(http.MaxBytesReader(w, r.Body, 4096))
+	limit := int64(4096)
+	if r.URL.Path == "/api/v1/enrollments" {
+		limit = 32 << 10 // up to 100 repository IDs and 50 bounded workflow references
+	}
+	decoder := json.NewDecoder(http.MaxBytesReader(w, r.Body, limit))
 	decoder.DisallowUnknownFields()
 	if decoder.Decode(value) != nil || decoder.Decode(new(any)) != io.EOF {
-		apiError(w, 400, "invalid_request", "Expected one JSON object with documented fields (maximum 4096 bytes)")
+		apiError(w, 400, "invalid_request", "Expected one JSON object with documented fields within the documented size limit")
 		return false
 	}
 	return true
@@ -202,7 +215,7 @@ func (s *Server) agentAPI(w http.ResponseWriter, r *http.Request) {
 		if r.Method != "GET" && r.Method != "HEAD" {
 			break
 		}
-		apiJSON(w, 200, map[string]any{"user": v.User, "scope": credential.Scope, "expires_at": credential.Expires, "name": credential.Name, "repository_ids": credential.RepositoryIDs})
+		apiJSON(w, 200, map[string]any{"user": v.User, "scope": credential.Scope, "expires_at": credential.Expires, "name": credential.Name, "repository_ids": credential.RepositoryIDs, "all_repositories": credential.AllRepositories})
 		return
 	case "/api/v1/queues":
 		if r.Method != "GET" && r.Method != "HEAD" {
@@ -220,14 +233,19 @@ func (s *Server) agentAPI(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		type repositoryChoice struct {
-			Installation Installation `json:"installation"`
-			Repository   Repository   `json:"repository"`
-			Notice       string       `json:"enrollment_notice,omitempty"`
+			Installation      Installation `json:"installation"`
+			Repository        Repository   `json:"repository"`
+			Notice            string       `json:"enrollment_notice,omitempty"`
+			OrganizationAdmin bool         `json:"organization_admin"`
 		}
 		out := []repositoryChoice{}
 		s.mu.Lock()
 		for _, c := range choices {
-			out = append(out, repositoryChoice{c.Installation, c.Repository, agentOrganizationConstraint(s.enrollments, v.User, c)})
+			notice := organizationConstraint(s.enrollments, v.User, c)
+			if !v.AgentAllRepositories {
+				notice = agentOrganizationConstraint(s.enrollments, v.User, c)
+			}
+			out = append(out, repositoryChoice{c.Installation, c.Repository, notice, c.OrganizationAdmin})
 		}
 		s.mu.Unlock()
 		apiJSON(w, 200, map[string]any{"repositories": out, "automatic_activation": s.cfg.AutomaticActivation})
@@ -241,15 +259,36 @@ func (s *Server) agentAPI(w http.ResponseWriter, r *http.Request) {
 			break
 		}
 		var input struct {
-			InstallationID int64    `json:"installation_id"`
-			RepositoryID   int64    `json:"repository_id"`
-			Queues         []string `json:"queues"`
-			WorkflowPath   string   `json:"workflow_path"`
+			InstallationID      int64               `json:"installation_id"`
+			RepositoryID        int64               `json:"repository_id"`
+			Queues              []string            `json:"queues"`
+			WorkflowPath        string              `json:"workflow_path"`
+			OrganizationAccess  *OrganizationAccess `json:"organization_access"`
+			ConfirmAllWorkflows bool                `json:"confirm_all_workflows"`
 		}
 		if !decodeAgentJSON(w, r, &input) {
 			return
 		}
 		r.PostForm = url.Values{"installation_id": {strconv.FormatInt(input.InstallationID, 10)}, "repository_id": {strconv.FormatInt(input.RepositoryID, 10)}, "queue": input.Queues, "workflow_path": {input.WorkflowPath}}
+		if input.OrganizationAccess != nil || input.ConfirmAllWorkflows {
+			if !v.AgentAllRepositories {
+				apiError(w, 403, "forbidden", "Full account management access is required for organization policy")
+				return
+			}
+			if input.OrganizationAccess == nil || !validOrganizationAccess(input.OrganizationAccess) {
+				apiError(w, 400, "invalid_request", "Invalid organization policy")
+				return
+			}
+			r.PostForm.Set("organization_access_version", "1")
+			r.PostForm.Set("repository_access", input.OrganizationAccess.RepositorySelection)
+			for _, id := range input.OrganizationAccess.RepositoryIDs {
+				r.PostForm.Add("selected_repository", strconv.FormatInt(id, 10))
+			}
+			r.PostForm.Set("allowed_workflows", strings.Join(input.OrganizationAccess.Workflows, "\n"))
+			if input.ConfirmAllWorkflows {
+				r.PostForm.Set("confirm_all_workflows", "1")
+			}
+		}
 		r.Form = r.PostForm
 		s.enrollRequest(w, r, v)
 		return
@@ -294,36 +333,54 @@ func (s *Server) agentEnrollments(w http.ResponseWriter, r *http.Request, v sess
 		return
 	}
 	// Explicit customer-facing projection: no operator messages, usage snapshots,
-	// authenticated provenance, or another user's enrollments are serialized.
+	// authenticated provenance, or unauthorized user enrollments are serialized.
+	// Full account tokens may see a shared organization service after fresh owner verification.
 	type enrollmentView struct {
-		ID                    string     `json:"id"`
-		InstallationID        int64      `json:"installation_id"`
-		Repository            Repository `json:"repository"`
-		Scope                 string     `json:"scope"`
-		Status                string     `json:"status"`
-		DesiredState          string     `json:"desired_state"`
-		Queues                []string   `json:"queues"`
-		EnabledQueues         []string   `json:"enabled_queues"`
-		WorkflowPath          string     `json:"workflow_path,omitempty"`
-		EnabledWorkflowPath   string     `json:"enabled_workflow_path,omitempty"`
-		EnabledWorkflowAccess string     `json:"enabled_workflow_access,omitempty"`
-		Updated               time.Time  `json:"updated_at"`
+		ID                        string              `json:"id"`
+		InstallationID            int64               `json:"installation_id"`
+		Repository                Repository          `json:"repository"`
+		Scope                     string              `json:"scope"`
+		Status                    string              `json:"status"`
+		DesiredState              string              `json:"desired_state"`
+		Queues                    []string            `json:"queues"`
+		EnabledQueues             []string            `json:"enabled_queues"`
+		WorkflowPath              string              `json:"workflow_path,omitempty"`
+		EnabledWorkflowPath       string              `json:"enabled_workflow_path,omitempty"`
+		EnabledWorkflowAccess     string              `json:"enabled_workflow_access,omitempty"`
+		Updated                   time.Time           `json:"updated_at"`
+		OrganizationAccess        *OrganizationAccess `json:"organization_access,omitempty"`
+		AppliedOrganizationAccess *OrganizationAccess `json:"applied_organization_access,omitempty"`
 	}
 	out := []enrollmentView{}
 	s.mu.Lock()
 	for _, e := range s.enrollments {
-		if !agentEnrollmentAllowed(v, e, s.enrollments) {
+		if !v.AgentAllRepositories && !agentEnrollmentAllowed(v, e, s.enrollments) {
 			continue
 		}
+		if v.AgentAllRepositories {
+			if e.Account.Type == "Organization" {
+				canonical := canonicalOrganization(s.enrollments, e.Account.ID)
+				if canonical == nil || canonical.ID != e.ID || !organizationOwner(choices, e) {
+					continue
+				}
+			} else if e.User.ID != v.User.ID {
+				continue
+			}
+		}
 		for _, c := range choices {
-			if c.Installation.ID != e.InstallationID || c.Repository.ID != e.Repository.ID {
+			accountOwner := v.AgentAllRepositories && e.Account.Type == "Organization" && c.OrganizationAdmin && c.Installation.Account.ID == e.Account.ID
+			if c.Installation.ID != e.InstallationID || (!accountOwner && c.Repository.ID != e.Repository.ID) {
 				continue
 			}
 			requested := append([]string{}, e.Queues...)
 			if len(requested) == 0 {
 				requested = []string{"chickadee"}
 			}
-			out = append(out, enrollmentView{e.ID, e.InstallationID, c.Repository, e.Scope, e.Status, e.DesiredState, requested, append([]string{}, e.EnabledQueues...), e.WorkflowPath, e.EnabledWorkflowPath, e.EnabledWorkflowAccess, e.Updated})
+			repository := c.Repository
+			if accountOwner {
+				repository = e.Repository
+			}
+			out = append(out, enrollmentView{ID: e.ID, InstallationID: e.InstallationID, Repository: repository, Scope: e.Scope, Status: e.Status, DesiredState: e.DesiredState, Queues: requested, EnabledQueues: append([]string{}, e.EnabledQueues...), WorkflowPath: e.WorkflowPath, EnabledWorkflowPath: e.EnabledWorkflowPath, EnabledWorkflowAccess: e.EnabledWorkflowAccess, Updated: e.Updated, OrganizationAccess: e.OrganizationAccess, AppliedOrganizationAccess: e.AppliedOrganizationAccess})
 			break
 		}
 	}
@@ -357,8 +414,8 @@ func (s *Server) agentSchema(w http.ResponseWriter, r *http.Request) {
 	_, _ = w.Write(data)
 }
 
-// API v1 delegates exact repositories, not the broader organization-owner
-// authority used by browser setup. Explicit desired or applied organization
+// Repository-scoped API v1 tokens delegate exact repositories, not the broader
+// organization-owner authority available to full account tokens and browser setup. Explicit desired or applied organization
 // policy remains browser-only, including transitions between the two policies.
 const agentOrganizationSetupMessage = "Organization-wide service controls require browser owner setup; API v1 supports existing repository services."
 

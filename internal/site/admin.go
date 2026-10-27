@@ -140,6 +140,10 @@ func (s *Server) manageRequest(w http.ResponseWriter, r *http.Request, v session
 			operationError(w, r, "Service is outside this token's repository authority; use browser owner setup for organization-wide controls", 403)
 			return
 		}
+		if v.AgentAllRepositories && entry.Account.Type == "Organization" && !organizationOwner(choices, entry) {
+			operationError(w, r, "Current organization owner access is required", 403)
+			return
+		}
 		authorized := organizationOwner(choices, entry) && (action != "active" || entry.Status == "paused" || entry.Status == "disconnected")
 		for _, choice := range choices {
 			if choice.authorizes(entry) {

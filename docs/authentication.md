@@ -57,8 +57,8 @@ unchanged by automatic activation.
 ## Agent delegation
 
 Persistent agent API access is explicitly enabled with a private 32-byte
-`CHICKADEE_AGENT_KEY_FILE`. Signed-in users create named tokens for selected
-repositories and read/manage scope at `/settings/tokens`, with expiry from 1 to
+`CHICKADEE_AGENT_KEY_FILE`. Signed-in users create named tokens for all current and future authorized
+repositories or specific repositories, independently of read/manage scope at `/settings/tokens`, with expiry from 1 to
 90 days. This is a deliberate extension of the memory-only browser credential
 model: token digests and delegated GitHub access/refresh grants are stored in a
 versioned authenticated-encryption file in private web state. The encryption key
@@ -67,8 +67,9 @@ and never stored. Token pages omit third-party scripts.
 
 Agent tokens survive browser logout and website restarts; the user can revoke
 them from any current session. They can narrow but never expand current GitHub
-access. API repository reads and mutations intersect selected repository IDs
-with live GitHub administration checks. Refresh exchanges verify numeric identity
+access. API repository reads and mutations use live GitHub administration checks;
+specific tokens additionally intersect their selected IDs. Full account
+organization operations also require fresh verified owner access. Refresh exchanges verify numeric identity
 and save rotated credentials before access continues. GitHub authorization
 revocation or expiry can require human sign-in again. Normal browser sessions
 retain their one-hour lifetime; without agent delegation enabled, they retain

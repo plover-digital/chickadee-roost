@@ -112,13 +112,14 @@ type oauthState struct {
 	Expires          time.Time
 }
 type session struct {
-	User              User
-	Token, CSRF       string
-	Expires           time.Time
-	RefreshToken      string
-	GitHubExpires     time.Time
-	RefreshExpires    time.Time
-	AgentRepositories map[int64]bool
+	User                 User
+	Token, CSRF          string
+	Expires              time.Time
+	RefreshToken         string
+	GitHubExpires        time.Time
+	RefreshExpires       time.Time
+	AgentRepositories    map[int64]bool
+	AgentAllRepositories bool
 }
 type Server struct {
 	cfg          Config
