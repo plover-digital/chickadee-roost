@@ -1,8 +1,8 @@
 # Agent access
 
 GitHub remains the only human sign-in method. After sign-in and GitHub App
-installation, open `/settings/tokens` to create a named token. Select its
-repositories, read-only or management permission, and expiry: 1, 7, 30 or 90 days,
+installation, open `/settings/tokens` to create a named token. Choose Full account (all current and future authorized repositories) or specific
+repositories, independently of read-only or management permission, and expiry: 1, 7, 30 or 90 days,
 with 30 days selected by default. The token is shown once. Put it in the agent's
 secret store as `CHICKADEE_TOKEN`, then point the agent to `/llms.txt` on this
 site. `/agents` provides the human introduction.
@@ -17,23 +17,23 @@ ordinary HTTPS clients. GitHub still receives workflows and dispatches jobs.
 
 Agent tokens deliberately outlive the existing one-hour browser session and web
 restarts. Browser logout does not revoke them; use the account-wide token list
-to revoke access. Each token has a maximum lifetime of 90 days and is restricted
-to selected repository IDs. Discovery and mutation recheck current GitHub admin
-access and intersect it with those IDs. New repositories never expand an existing
-token. Organization-wide repository/workflow policy controls remain browser-only
-in API v1: records with explicit desired or applied organization policy are
-excluded from API reads and mutations, even for verified owners or a policy
-currently selecting only one repository. The API can maintain an existing legacy
-organization enrollment only for its exact recorded user, installation and
-repository; new organization setup requires the browser. This prevents a token
-for one repository acquiring shared organization-owner authority. Personal
-repository operations remain available. Current admission policy still applies.
+to revoke access. Each token has a maximum lifetime of 90 days. Repository coverage and permissions
+are independent: read or manage tokens can cover all current and future
+repositories, or only specific repository IDs. Manage includes read. Full account
+coverage rechecks current GitHub administration and App access; selected tokens
+intersect those checks with their original IDs. New repositories never expand
+selected tokens. Existing tokens remain selected. Organization policy and
+lifecycle require full account access plus current verified organization owner
+authority; read-only tokens cannot mutate either. The same browser validation,
+workflow confirmation, GitHub permissions and backend admission checks apply.
+Specific tokens retain exact legacy organization queue authority and cannot
+control shared organization policy or lifecycle. No token grants operator access.
 Revocation prevents subsequent requests; an already authorized in-flight request
 may finish. The API cannot mint or refresh Chickadee tokens.
 
 Raw Chickadee tokens are never stored. SHA-256 token digests, names, repository
 restrictions, expiry and the delegated GitHub grants are stored in
-`agent-credentials.enc` in the private web state directory. The whole version-1
+`agent-credentials.enc` in the private web state directory. The whole version-2
 store is authenticated and encrypted using AES-256-GCM and a fresh random nonce
 on each atomic, fsynced replacement. The service refuses corrupt ciphertext,
 wrong keys, unsupported versions and unsafe file permissions at startup.
@@ -83,7 +83,7 @@ Existing sign-ins without refresh metadata must sign in again to create tokens.
 ## Compatibility and rollout
 
 This adds the Roost service API **v1** under `/api/v1/` and encrypted agent-state
-format **1**. Workerapi v1, stored enrollment fields, cookies, callback URL,
+format **2** (version-1 stores are read without broadening existing tokens). Workerapi v1, stored enrollment fields, cookies, callback URL,
 operator bridge, broker, standalone operation and service admission stay
 compatible relative to current main. No external database is added. No engine
 repository change is needed. Preserve the separate [organization-access rollout
@@ -107,3 +107,19 @@ A proxy path allowlist must permit `/agents`, `/agents.md`, `/llms.txt`,
 Keep private Unix admin/status/import/telemetry routes absent from public HTTP.
 Rollback to an older web binary leaves the encrypted store unused; it does not
 revoke saved tokens. Explicitly revoke/reset grants before retiring the feature.
+
+### Full account rollout compatibility
+
+Deploy the web binary and embedded assets together; broker, workerapi and engine
+changes are unnecessary. Credential metadata format 2 adds explicit
+`all_repositories`; the AES-GCM envelope and key are retained. Version-1 stores
+are read as specific-repository tokens and upgraded on the next write. Existing
+tokens are never broadened. Older binaries reject format 2; to roll back to an
+older binary, disable agent credential loading first and preserve the encrypted
+store and key for a forward upgrade. Do not reset credentials during rollback.
+
+Service API v1 adds `all_repositories` in identity, `organization_admin` in
+repository discovery, organization policy in enrollment reads, and optional
+`organization_access` / `confirm_all_workflows` in enrollment requests. Existing
+repository tokens keep their behavior; full account tokens follow live access,
+including repositories added later. The existing bounded beta list limits apply.

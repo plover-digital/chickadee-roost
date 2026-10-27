@@ -454,7 +454,7 @@ func TestAgentOAuthDelegationOptIn(t *testing.T) {
 
 func TestAgentSharedGrantConcurrentRefresh(t *testing.T) {
 	s, first := agentFixture(t)
-	second, err := s.agentVault.create("session", s.sessions["session"], "Second agent", "read", []int64{99}, 7*24*time.Hour)
+	second, err := s.agentVault.create("session", s.sessions["session"], "Second agent", "read", []int64{99}, 7*24*time.Hour, false)
 	if err != nil {
 		t.Fatal(err)
 	}

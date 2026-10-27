@@ -2,8 +2,8 @@
   "openapi": "3.1.0",
   "info": {
     "title": "Chickadee Roost service API",
-    "version": "1.0.0",
-    "description": "Human GitHub onboarding creates named, repository-scoped tokens at /settings/tokens. Tokens default to read-only and 30 days, with 1/7/30/90-day choices. Send Authorization: Bearer TOKEN. Normal browser cookies cannot authenticate this API. GitHub still schedules jobs; this API is not a VM execution API. GET routes also support HEAD. Bounded beta lists have no pagination. See /agents.md for approval, state, error and retry semantics. Organization-wide repository/workflow policies require browser owner setup and are excluded from API v1. Existing legacy organization records require their exact recorded user, installation and repository; new organization enrollment is browser-only."
+    "version": "1.1.0",
+    "description": "Human GitHub onboarding creates named tokens at /settings/tokens. Repository coverage (full account including future repositories, or specific IDs) is independent of read/manage permissions. Manage includes read. Tokens default to read-only and 30 days with 1/7/30/90-day choices. Send Authorization: Bearer TOKEN; cookies do not authenticate the API. All operations are limited by current GitHub and App permissions. Full account organization policy and lifecycle operations require current verified organization ownership; specific tokens retain narrow legacy authority. GitHub schedules jobs; this API manages requested service state, not arbitrary VM execution. GET supports HEAD. Bounded beta lists have no pagination. See /agents.md."
   },
   "servers": [
     {
@@ -257,7 +257,7 @@
       "get": {
         "operationId": "listEnrollments",
         "summary": "List this user\u2019s authorized service requests and applied state",
-        "description": "Requires read or manage scope. Repository-sensitive reads recheck current GitHub administration access. Explicit desired/applied organization policies are excluded.",
+        "description": "Requires read or manage. Repository-sensitive reads recheck current GitHub access. Specific tokens exclude explicit organization policies. Full account tokens include canonical organization services only for a currently verified organization owner.",
         "responses": {
           "200": {
             "description": "Success",
@@ -334,7 +334,7 @@
       "post": {
         "operationId": "requestEnrollment",
         "summary": "Create or update a repository\u2019s desired queue selection",
-        "description": "Requires manage scope. A saved request does not change applied runner state until reconciliation. New organization setup and explicit organization policy changes require the browser; existing exact legacy organization requests may be maintained.",
+        "description": "Requires manage (includes read). Saved intent awaits reconciliation. Full account tokens may submit organization_access after current verified organization ownership; selected tokens may maintain only exact existing legacy organization queues. Workflow confirmations and App/backend permissions still apply. Maximum JSON body 32768 bytes; unknown fields rejected.",
         "responses": {
           "202": {
             "description": "Request accepted for reconciliation",
@@ -461,7 +461,7 @@
       "post": {
         "operationId": "requestState",
         "summary": "Request activation/resume, pause or disconnection",
-        "description": "Requires manage scope. A saved request does not change applied runner state until reconciliation. Organization-wide policies and another owner\u2019s enrollment are outside repository token authority.",
+        "description": "Requires manage and current GitHub authority. Personal services require repository administration; organization lifecycle requires a full account token and current verified organization owner. Saves desired state without claiming applied capacity. Maximum body 4096 bytes.",
         "responses": {
           "202": {
             "description": "Request accepted for reconciliation",
@@ -735,6 +735,12 @@
           "updated_at": {
             "type": "string",
             "format": "date-time"
+          },
+          "organization_access": {
+            "$ref": "#/components/schemas/OrganizationAccess"
+          },
+          "applied_organization_access": {
+            "$ref": "#/components/schemas/OrganizationAccess"
           }
         },
         "required": [
@@ -826,11 +832,16 @@
               "type": "integer",
               "format": "int64",
               "minimum": 1
-            }
+            },
+            "description": "Specific repository IDs; empty for full account tokens."
           },
           "expires_at": {
             "type": "string",
             "format": "date-time"
+          },
+          "all_repositories": {
+            "type": "boolean",
+            "description": "True for full account access to all current and future GitHub-authorized repositories. False retains specific repository IDs."
           }
         },
         "required": [
@@ -838,7 +849,8 @@
           "scope",
           "name",
           "repository_ids",
-          "expires_at"
+          "expires_at",
+          "all_repositories"
         ]
       },
       "Queues": {
@@ -878,6 +890,10 @@
                 },
                 "enrollment_notice": {
                   "type": "string"
+                },
+                "organization_admin": {
+                  "type": "boolean",
+                  "description": "Current verified organization owner membership. Does not expand a repository-scoped token."
                 }
               },
               "required": [
@@ -929,6 +945,13 @@
           "workflow_path": {
             "type": "string",
             "maxLength": 125
+          },
+          "organization_access": {
+            "$ref": "#/components/schemas/OrganizationAccess"
+          },
+          "confirm_all_workflows": {
+            "type": "boolean",
+            "description": "Explicitly confirm all workflows when converting legacy organization policy whose workflow access is unknown. Requires organization_access and full account manage scope."
           }
         },
         "required": [
@@ -952,6 +975,70 @@
           "state"
         ],
         "additionalProperties": false
+      },
+      "OrganizationAccess": {
+        "type": "object",
+        "description": "Explicit organization policy; full account tokens and current verified organization ownership required. Omitted workflows permits all workflows. Selected IDs and workflow repositories must be in the App installation.",
+        "properties": {
+          "repository_selection": {
+            "enum": [
+              "all",
+              "selected"
+            ]
+          },
+          "repository_ids": {
+            "type": "array",
+            "maxItems": 100,
+            "uniqueItems": true,
+            "items": {
+              "type": "integer",
+              "format": "int64",
+              "minimum": 1
+            }
+          },
+          "workflows": {
+            "type": "array",
+            "maxItems": 50,
+            "uniqueItems": true,
+            "items": {
+              "type": "string",
+              "maxLength": 300,
+              "description": "owner/repo/.github/workflows/file.yml@refs/heads/main or a tag ref"
+            }
+          }
+        },
+        "required": [
+          "repository_selection"
+        ],
+        "additionalProperties": false,
+        "allOf": [
+          {
+            "if": {
+              "properties": {
+                "repository_selection": {
+                  "const": "selected"
+                }
+              }
+            },
+            "then": {
+              "required": [
+                "repository_ids"
+              ],
+              "properties": {
+                "repository_ids": {
+                  "minItems": 1
+                }
+              }
+            },
+            "else": {
+              "properties": {
+                "repository_ids": {
+                  "maxItems": 0
+                }
+              }
+            }
+          }
+        ]
       }
     }
   }

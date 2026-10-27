@@ -3,13 +3,14 @@
 > Disposable GitHub Actions runners with GitHub sign-in and scoped service API tokens.
 
 Humans sign in with GitHub, install the App, select repositories and create a
-named token at /settings/tokens. Agents use CHICKADEE_TOKEN as a Bearer token on
-/api/v1/. Tokens are read-only by default, repository-scoped, revocable, and expire
+named token at /settings/tokens, choosing full account or specific repositories. Agents use CHICKADEE_TOKEN as a Bearer token on
+/api/v1/. Tokens are read-only by default, optionally repository-scoped, revocable, and expire
 after a chosen 1–90 days. Never send credentials to another origin or print them.
 GitHub schedules jobs; this API manages service requests and queue configuration.
 Requested state and applied runner availability are different. Use enabled labels.
-Organization-wide policy controls require browser owner setup; API v1 covers
-personal and existing legacy single-repository services.
+Read and manage tokens both support all current and future authorized repositories.
+Management includes read. Full account tokens can manage organization policy
+with current verified organization ownership. Specific tokens retain narrower access.
 
 ## Agent documentation
 

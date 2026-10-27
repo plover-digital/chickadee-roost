@@ -8,8 +8,8 @@ https://chickadee.run). Use HTTPS except for localhost development.
 ## Authentication
 
 A human signs in with GitHub at /login, installs the GitHub App at /install,
-and creates a named token at /settings/tokens. They choose permitted repositories,
-read or manage scope, and an expiry of 1, 7, 30 or 90 days (default 30 days).
+and creates a named token at /settings/tokens. They choose Full account (all current and future authorized repositories)
+or specific repositories, independently of read or manage scope, and an expiry of 1, 7, 30 or 90 days (default 30 days).
 Store the token in CHICKADEE_TOKEN using the agent's secret store. Do not request
 a GitHub personal access token, OAuth client secret, browser session cookie,
 or App private key. See /openapi.json for the machine-readable contract.
@@ -20,11 +20,15 @@ GitHub, analytics, other origins, logs, issue bodies, or committed files. Do not
 follow redirects with credentials. Responses use Cache-Control: no-store.
 
 Read is the default. Manage includes read access and can request queue changes,
-enrollment, activation, pause and disconnection for selected repositories the
-user currently administers. Organization pause, resume, and disconnect require
-verified owner access in the browser, including legacy services. The token can narrow the user's access, never expand
-it. A new repository is not automatically added to an existing token. There is
-no operator/admin API access and no token-creation or token-refresh API.
+enrollment, activation, pause and disconnection. Both permission tiers offer
+Full account (all current and future repositories) or Specific repositories.
+Full account dynamically follows current GitHub administration and App access;
+specific tokens stay restricted to their original repository IDs. Existing
+tokens never gain account access automatically. Neither option grants GitHub
+permissions, repository content access, operator/admin access, or token creation.
+Full account organization operations additionally require current verified
+organization ownership. Specific-repository tokens cannot manage organization
+policy or lifecycle; use a full account token or the browser dashboard.
 
 Tokens continue working after browser sign-out and web-service restarts, until
 revoked or expired. GitHub authorization is refreshed on the server without
@@ -46,20 +50,15 @@ otherwise agent access returns 503. Normal GitHub browser sign-in remains usable
    enabled for this account or backed by currently idle runner capacity.
 4. GET /api/v1/enrollments for services owned by this user that they can still
    administer. Inspect status, desired_state, queues and enabled_queues.
-5. Complete new organization setup in the browser with a verified organization
-   owner. Organization-wide repository/workflow policies are browser-only in
-   API v1; repository tokens cannot view or change those shared services.
-   Personal services and existing legacy single-repository organization services
-   remain available for lookup and queue updates through the API. Organization
-   lifecycle controls require the browser. If authorized by the user, use a manage
-   token to POST /api/v1/enrollments
-   with the verified installation_id, repository_id and full desired queues
-   list. This creates or updates the request; omitted queues means the default
-   chickadee label only. For organization installations with manual activation,
-   workflow_path must name an existing main-branch .github/workflows/*.yml or
-   *.yaml file unless repository-wide workflow access was already approved.
-   automatic_activation from the repository response describes web policy;
-   backend policy and GitHub runner permissions still apply.
+5. If authorized by the user, use a manage token to POST /api/v1/enrollments
+   with verified installation_id, repository_id and the full desired queues list.
+   Omitted queues selects only chickadee. Full account tokens can set an explicit
+   organization_access policy after current organization owner verification.
+   Specific tokens can maintain only their exact existing legacy organization
+   service and cannot change its policy or lifecycle. For manual legacy setup,
+   workflow_path names an existing main-branch .github/workflows/*.yml or *.yaml
+   file unless repository-wide workflow access was already approved.
+   automatic_activation describes web policy; backend admission still applies.
 6. A 202 means saved intent, not applied capacity. Re-read enrollments at a
    bounded interval (for example every 10 seconds for up to two minutes).
    If still pending, report the state and stop polling. Approval may require
@@ -75,14 +74,11 @@ otherwise agent access returns 503. Normal GitHub browser sign-in remains usable
 
 The default chickadee label is medium / Ubuntu 26.04. Discover additional labels
 from the API rather than assuming preview platforms are available. Organization
-setup supports broader access through the browser. API v1 preserves exact user,
-installation and repository identity for legacy organization records; it cannot
-create a new organization service or adopt organization-owner takeover powers.
-An explicit desired or applied organization policy excludes that service from
-API v1, even if its current policy selects only one repository. An empty API
-enrollment list therefore does not prove the organization service is absent.
-Use the browser dashboard for its status and controls. enrollment_notice explains
-setup requirements without exposing another customer's data.
+setup supports full account tokens with verified organization owner access or
+the browser dashboard. Repository-scoped tokens preserve exact user,
+installation and repository identity for legacy services and exclude explicit
+organization-wide policies. An empty list from a scoped token does not prove
+an organization service is absent. enrollment_notice explains setup constraints.
 
 ## Endpoints
 
@@ -92,7 +88,9 @@ there is no pagination. Oversized GitHub results fail closed.
 GET endpoints also support HEAD. Other methods return 405 with Allow.
 
 GET /api/v1/me
-Response: {"user":{"id":7,"login":"example"},"scope":"read","name":"My agent","repository_ids":[99],"expires_at":"RFC3339"}
+Response: {"user":{"id":7,"login":"example"},"scope":"read","name":"My agent","repository_ids":[99],"all_repositories":false,"expires_at":"RFC3339"}
+
+For full account tokens, all_repositories is true and repository_ids is [].
 
 GET /api/v1/queues
 Response: {"default_queue":"chickadee","queues":["chickadee", "..."]}
@@ -102,12 +100,14 @@ Response: {"automatic_activation":false,"repositories":[{"installation":{"id":8,
 "app_id":42,"account":{"id":7,"login":"example","type":"User"},
 "permissions":{"administration":"write"}},"repository":{"id":99,
 "full_name":"example/repo","private":true,"permissions":{"admin":true}},
-"enrollment_notice":"optional constraint"}]}
+"organization_admin":false,"enrollment_notice":"optional constraint"}]}
 
 GET /api/v1/enrollments
-Personal and legacy organization records only; organization-wide policies are
-excluded. Broader organization control requires a future explicit organization
-token scope, not just a repository-scoped token.
+Specific tokens return personal and exact legacy organization records. Full
+account tokens also return canonical organization services when the user is
+currently verified as an organization owner, including services enrolled by
+another owner. Organization policy is returned as organization_access and
+applied_organization_access; requested policy and applied policy can differ.
 Response: {"enrollments":[{"id":"opaque-id","installation_id":8,
 "repository":{"id":99,"full_name":"example/repo","private":true,
 "permissions":{"admin":true}},"scope":"repository","status":"pending",
@@ -125,20 +125,29 @@ POST /api/v1/enrollments (manage)
 Body: {"installation_id":8,"repository_id":99,"queues":["chickadee"],
 "workflow_path":".github/workflows/build.yml"}
 workflow_path is optional for personal repositories and automatic activation.
-New organization enrollment and explicit organization access policies require
-browser owner setup; this endpoint can maintain only an existing exact legacy
-organization record. Organization policy fields are not accepted by API v1.
-Unknown fields (including private, authenticated and workflow access grants)
-are rejected. Existing service state is retained when queues are updated;
-use the state endpoint for personal services or the browser for organization
-services to resume or reconnect a paused/disconnected service.
+For full account management tokens, optionally include:
+"organization_access":{"repository_selection":"all"}
+or {"repository_selection":"selected","repository_ids":[99],
+"workflows":["example/repo/.github/workflows/build.yml@refs/heads/main"]}.
+Policy changes require a current verified organization owner and approved App
+runner permissions. Selected IDs and workflow repositories must be in the App
+installation. At most 100 selected IDs and 50 workflow references of 300 characters
+are allowed. Omitted workflows permits all workflows: send an explicit list to
+retain restrictions. When converting legacy services whose workflow policy is
+unknown, confirm_all_workflows:true explicitly confirms broadening access;
+otherwise supply a workflow allowlist. A versionless request cannot silently
+replace existing organization policy. Specific-repository tokens cannot submit
+organization_access or confirm_all_workflows. Unknown fields (including private
+and authenticated) are rejected. Existing desired lifecycle state is retained
+when queues or policy are updated; use the state endpoint to resume/reconnect.
 
 POST /api/v1/enrollments/{id}/state (manage)
 Body: {"state":"active"} or {"state":"paused"} or {"state":"disconnected"}
 Use the opaque id from the enrollment response. active requests activation,
 resume or reconnect; approval is still enforced by reconciliation.
-This endpoint accepts personal services only. Organization lifecycle requests
-return 403; use the browser with verified organization owner access.
+Personal services require current repository administration. Organization
+lifecycle requests require a full account management token and fresh verified
+organization owner access. Specific tokens receive 403 for organization lifecycle.
 
 Both POST endpoints return 202:
 {"accepted":true,"message":"Request saved; applied service state is unchanged until reconciliation.","status_url":"/api/v1/enrollments"}
@@ -174,7 +183,7 @@ Replace the illustrative numeric IDs with verified values from repositories.
 Error shape: {"error":{"code":"unauthorized","message":"..."}}.
 401 unauthorized: missing, invalid, revoked or expired token; obtain a new one.
 403 insufficient_scope/forbidden: use an approved manage token, restore GitHub
-administration access, or use browser owner setup for organization-wide services.
+administration access, or use full account access with verified organization ownership.
 Tokens cannot bypass installation permissions or gain broader organization scope.
 400 invalid_request: fix the documented JSON fields, queue names or workflow path.
 409 conflict: organization manager/repository conflict; request operator help.
@@ -186,7 +195,7 @@ could not be saved; contact the operator or retry later.
 500 save_failed: no success is confirmed; inspect state before retrying.
 404 not_found / 405 method_not_allowed: check the version, route and method.
 
-Request bodies are limited to 4096 bytes; send exactly one JSON object with
+Enrollment request bodies are limited to 32768 bytes; other bodies to 4096 bytes; send exactly one JSON object with
 no unknown fields. Cross-origin browser requests are rejected. Browser settings
 forms still require a signed-in session, exact Origin, and CSRF token.
 Private Unix admin/status/import/telemetry routes are not public service APIs.

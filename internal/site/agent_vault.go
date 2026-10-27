@@ -18,18 +18,19 @@ import (
 	"time"
 )
 
-const agentStoreVersion = 1
+const agentStoreVersion = 2
 const maxAgentTokens = 4096
 
 type agentToken struct {
-	ID            string    `json:"id"`
-	GrantID       string    `json:"grant_id"`
-	UserID        int64     `json:"user_id"`
-	Name          string    `json:"name"`
-	Scope         string    `json:"scope"`
-	RepositoryIDs []int64   `json:"repository_ids"`
-	Created       time.Time `json:"created_at"`
-	Expires       time.Time `json:"expires_at"`
+	ID              string    `json:"id"`
+	GrantID         string    `json:"grant_id"`
+	UserID          int64     `json:"user_id"`
+	Name            string    `json:"name"`
+	Scope           string    `json:"scope"`
+	RepositoryIDs   []int64   `json:"repository_ids"`
+	AllRepositories bool      `json:"all_repositories,omitempty"`
+	Created         time.Time `json:"created_at"`
+	Expires         time.Time `json:"expires_at"`
 }
 type agentGrant struct {
 	User            User      `json:"user"`
@@ -84,11 +85,11 @@ func newAgentVault(key []byte, dir string) (*agentVault, error) {
 		return nil, errors.New("invalid agent credential store")
 	}
 	plain, err := aead.Open(nil, data[:aead.NonceSize()], data[aead.NonceSize():], []byte("chickadee-agent-v1"))
-	if err != nil || json.Unmarshal(plain, &v.state) != nil || v.state.Version != agentStoreVersion || v.state.Tokens == nil || v.state.Grants == nil || len(v.state.Tokens) > maxAgentTokens || len(v.state.Grants) > maxAgentTokens {
+	if err != nil || json.Unmarshal(plain, &v.state) != nil || (v.state.Version != 1 && v.state.Version != agentStoreVersion) || v.state.Tokens == nil || v.state.Grants == nil || len(v.state.Tokens) > maxAgentTokens || len(v.state.Grants) > maxAgentTokens {
 		return nil, errors.New("agent credential store cannot be decrypted or has an unsupported format")
 	}
 	for digest, t := range v.state.Tokens {
-		if len(digest) != 64 || t.UserID <= 0 || t.ID == "" || t.Name == "" || (t.Scope != "read" && t.Scope != "manage") || len(t.RepositoryIDs) == 0 || len(t.RepositoryIDs) > 500 || t.Expires.IsZero() || t.Created.IsZero() || t.Expires.After(t.Created.Add(90*24*time.Hour)) {
+		if (v.state.Version == 1 && t.AllRepositories) || len(digest) != 64 || t.UserID <= 0 || t.ID == "" || t.Name == "" || (t.Scope != "read" && t.Scope != "manage") || (!t.AllRepositories && len(t.RepositoryIDs) == 0) || (t.AllRepositories && len(t.RepositoryIDs) != 0) || len(t.RepositoryIDs) > 500 || t.Expires.IsZero() || t.Created.IsZero() || t.Expires.After(t.Created.Add(90*24*time.Hour)) {
 			return nil, errors.New("invalid agent token metadata")
 		}
 		grant, ok := v.state.Grants[t.GrantID]
@@ -96,6 +97,9 @@ func newAgentVault(key []byte, dir string) (*agentVault, error) {
 			return nil, errors.New("invalid agent grant identity")
 		}
 	}
+	// Version 1 tokens remain repository-scoped. Persist the new metadata version
+	// on the next write; older binaries fail closed rather than ignore account scope.
+	v.state.Version = agentStoreVersion
 	v.pruneLocked()
 	return v, nil
 }
@@ -170,10 +174,13 @@ func (v *agentVault) list(userID int64) []agentToken {
 	}
 	return out
 }
-func (v *agentVault) create(sid string, user session, name, scope string, repositories []int64, lifetime time.Duration) (string, error) {
+func (v *agentVault) create(sid string, user session, name, scope string, repositories []int64, lifetime time.Duration, allRepositories bool) (string, error) {
 	v.mu.Lock()
 	defer v.mu.Unlock()
 	v.pruneLocked()
+	if (allRepositories && len(repositories) != 0) || (!allRepositories && len(repositories) == 0) {
+		return "", errors.New("Choose full account or specific repositories")
+	}
 	count := 0
 	for _, t := range v.state.Tokens {
 		if t.UserID == user.User.ID {
@@ -189,7 +196,7 @@ func (v *agentVault) create(sid string, user session, name, scope string, reposi
 	grantID := agentDigest(sid)
 	raw := "chk_" + random()
 	now := time.Now().UTC()
-	token := agentToken{ID: random(), GrantID: grantID, UserID: user.User.ID, Name: name, Scope: scope, RepositoryIDs: repositories, Created: now, Expires: now.Add(lifetime)}
+	token := agentToken{ID: random(), GrantID: grantID, UserID: user.User.ID, Name: name, Scope: scope, RepositoryIDs: repositories, AllRepositories: allRepositories, Created: now, Expires: now.Add(lifetime)}
 	_, existed := v.state.Grants[grantID]
 	if !existed {
 		v.state.Grants[grantID] = agentGrant{User: user.User, Token: user.Token, RefreshToken: user.RefreshToken, Expires: user.GitHubExpires, RefreshExpires: user.RefreshExpires}
@@ -314,5 +321,8 @@ func (s *Server) authorizeAgent(r *http.Request, raw string) (agentToken, sessio
 	for _, id := range token.RepositoryIDs {
 		allowed[id] = true
 	}
-	return token, session{User: grant.User, Token: grant.Token, Expires: token.Expires, AgentRepositories: allowed}, 0, ""
+	if token.AllRepositories {
+		allowed = nil
+	}
+	return token, session{AgentAllRepositories: token.AllRepositories, User: grant.User, Token: grant.Token, Expires: token.Expires, AgentRepositories: allowed}, 0, ""
 }

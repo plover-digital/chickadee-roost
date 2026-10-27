@@ -58,8 +58,8 @@ has enabled them; see [activation policy](docs/onboarding-site.md#activation-pol
 
 ## Agent access
 
-Keep GitHub sign-in, then create a named, repository-scoped token at
-`/settings/tokens`. Read-only is the default; management access is explicit.
+Keep GitHub sign-in, then create a named full account or specific-repository token at
+`/settings/tokens`. Both offer read-only (the default) or management access, which includes read.
 Tokens expire after 1–90 days and can be revoked. Point terminal agents to
 `/llms.txt` for the API v1 guide and OpenAPI schema. Operators must explicitly
 enable encrypted credential storage. See [agent access](docs/agent-api.md).
