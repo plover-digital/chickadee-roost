@@ -1,0 +1,1607 @@
+{
+  "schema_version": 1,
+  "baseline_roost": "39b9a56680232960de93c5246b3c358583473124",
+  "data_kind": "synthetic offline simulation; not deployment inventory or live latency",
+  "model": "internal/fleet/simulation_test.go",
+  "time_unit": "logical seconds; RPCs have zero modeled latency",
+  "reproducibility": "fixed arrival/duration seeds; production random assignment IDs and async cleanup tie order can vary exact outcomes",
+  "main": [
+    {
+      "scenario": "low",
+      "policy": "current",
+      "seed": 42,
+      "jobs": 240,
+      "P50": 0,
+      "P95": 32,
+      "Max": 78,
+      "finish_s": 2423,
+      "scope_blocked_job_s": 1559,
+      "resource_blocked_job_s": 17,
+      "queued_while_placeable_queue_s": 1,
+      "peak_running": 5,
+      "peak_allocated": 6,
+      "per_host": {
+        "worker-00": 160,
+        "worker-01": 80
+      }
+    },
+    {
+      "scenario": "low",
+      "policy": "spread",
+      "seed": 42,
+      "jobs": 240,
+      "P50": 0,
+      "P95": 32,
+      "Max": 77,
+      "finish_s": 2423,
+      "scope_blocked_job_s": 1537,
+      "resource_blocked_job_s": 22,
+      "queued_while_placeable_queue_s": 4,
+      "peak_running": 5,
+      "peak_allocated": 6,
+      "per_host": {
+        "worker-00": 134,
+        "worker-01": 106
+      }
+    },
+    {
+      "scenario": "low",
+      "policy": "round-robin",
+      "seed": 42,
+      "jobs": 240,
+      "P50": 0,
+      "P95": 32,
+      "Max": 77,
+      "finish_s": 2423,
+      "scope_blocked_job_s": 1535,
+      "resource_blocked_job_s": 13,
+      "queued_while_placeable_queue_s": 1,
+      "peak_running": 5,
+      "peak_allocated": 6,
+      "per_host": {
+        "worker-00": 121,
+        "worker-01": 119
+      }
+    },
+    {
+      "scenario": "low",
+      "policy": "adaptive-warm",
+      "seed": 42,
+      "jobs": 240,
+      "P50": 0,
+      "P95": 32,
+      "Max": 78,
+      "finish_s": 2423,
+      "scope_blocked_job_s": 1559,
+      "resource_blocked_job_s": 17,
+      "queued_while_placeable_queue_s": 1,
+      "peak_running": 5,
+      "peak_allocated": 6,
+      "per_host": {
+        "worker-00": 160,
+        "worker-01": 80
+      }
+    },
+    {
+      "scenario": "low",
+      "policy": "eager-fill",
+      "seed": 42,
+      "jobs": 240,
+      "P50": 0,
+      "P95": 32,
+      "Max": 77,
+      "finish_s": 2423,
+      "scope_blocked_job_s": 1553,
+      "resource_blocked_job_s": 18,
+      "queued_while_placeable_queue_s": 1,
+      "peak_running": 5,
+      "peak_allocated": 6,
+      "per_host": {
+        "worker-00": 160,
+        "worker-01": 80
+      }
+    },
+    {
+      "scenario": "low-quota4",
+      "policy": "current",
+      "seed": 42,
+      "jobs": 240,
+      "P50": 0,
+      "P95": 6,
+      "Max": 14,
+      "finish_s": 2412,
+      "scope_blocked_job_s": 0,
+      "resource_blocked_job_s": 184,
+      "queued_while_placeable_queue_s": 7,
+      "peak_running": 6,
+      "peak_allocated": 6,
+      "per_host": {
+        "worker-00": 149,
+        "worker-01": 91
+      }
+    },
+    {
+      "scenario": "low-quota4",
+      "policy": "spread",
+      "seed": 42,
+      "jobs": 240,
+      "P50": 0,
+      "P95": 6,
+      "Max": 21,
+      "finish_s": 2412,
+      "scope_blocked_job_s": 0,
+      "resource_blocked_job_s": 166,
+      "queued_while_placeable_queue_s": 9,
+      "peak_running": 6,
+      "peak_allocated": 6,
+      "per_host": {
+        "worker-00": 133,
+        "worker-01": 107
+      }
+    },
+    {
+      "scenario": "low-quota4",
+      "policy": "round-robin",
+      "seed": 42,
+      "jobs": 240,
+      "P50": 0,
+      "P95": 6,
+      "Max": 13,
+      "finish_s": 2412,
+      "scope_blocked_job_s": 0,
+      "resource_blocked_job_s": 158,
+      "queued_while_placeable_queue_s": 6,
+      "peak_running": 6,
+      "peak_allocated": 6,
+      "per_host": {
+        "worker-00": 120,
+        "worker-01": 120
+      }
+    },
+    {
+      "scenario": "low-quota4",
+      "policy": "adaptive-warm",
+      "seed": 42,
+      "jobs": 240,
+      "P50": 0,
+      "P95": 6,
+      "Max": 14,
+      "finish_s": 2412,
+      "scope_blocked_job_s": 0,
+      "resource_blocked_job_s": 184,
+      "queued_while_placeable_queue_s": 7,
+      "peak_running": 6,
+      "peak_allocated": 6,
+      "per_host": {
+        "worker-00": 149,
+        "worker-01": 91
+      }
+    },
+    {
+      "scenario": "low-quota4",
+      "policy": "eager-fill",
+      "seed": 42,
+      "jobs": 240,
+      "P50": 0,
+      "P95": 6,
+      "Max": 14,
+      "finish_s": 2412,
+      "scope_blocked_job_s": 0,
+      "resource_blocked_job_s": 184,
+      "queued_while_placeable_queue_s": 6,
+      "peak_running": 6,
+      "peak_allocated": 6,
+      "per_host": {
+        "worker-00": 149,
+        "worker-01": 91
+      }
+    },
+    {
+      "scenario": "near-capacity",
+      "policy": "current",
+      "seed": 42,
+      "jobs": 240,
+      "P50": 39,
+      "P95": 196,
+      "Max": 243,
+      "finish_s": 1389,
+      "scope_blocked_job_s": 10769,
+      "resource_blocked_job_s": 3237,
+      "queued_while_placeable_queue_s": 140,
+      "peak_running": 6,
+      "peak_allocated": 6,
+      "per_host": {
+        "worker-00": 127,
+        "worker-01": 113
+      }
+    },
+    {
+      "scenario": "near-capacity",
+      "policy": "spread",
+      "seed": 42,
+      "jobs": 240,
+      "P50": 35,
+      "P95": 153,
+      "Max": 199,
+      "finish_s": 1324,
+      "scope_blocked_job_s": 9825,
+      "resource_blocked_job_s": 2762,
+      "queued_while_placeable_queue_s": 101,
+      "peak_running": 6,
+      "peak_allocated": 6,
+      "per_host": {
+        "worker-00": 124,
+        "worker-01": 116
+      }
+    },
+    {
+      "scenario": "near-capacity",
+      "policy": "round-robin",
+      "seed": 42,
+      "jobs": 240,
+      "P50": 39,
+      "P95": 159,
+      "Max": 199,
+      "finish_s": 1352,
+      "scope_blocked_job_s": 10250,
+      "resource_blocked_job_s": 2767,
+      "queued_while_placeable_queue_s": 130,
+      "peak_running": 6,
+      "peak_allocated": 6,
+      "per_host": {
+        "worker-00": 120,
+        "worker-01": 120
+      }
+    },
+    {
+      "scenario": "near-capacity",
+      "policy": "adaptive-warm",
+      "seed": 42,
+      "jobs": 240,
+      "P50": 39,
+      "P95": 177,
+      "Max": 222,
+      "finish_s": 1370,
+      "scope_blocked_job_s": 10484,
+      "resource_blocked_job_s": 3234,
+      "queued_while_placeable_queue_s": 154,
+      "peak_running": 6,
+      "peak_allocated": 6,
+      "per_host": {
+        "worker-00": 124,
+        "worker-01": 116
+      }
+    },
+    {
+      "scenario": "near-capacity",
+      "policy": "eager-fill",
+      "seed": 42,
+      "jobs": 240,
+      "P50": 37,
+      "P95": 182,
+      "Max": 228,
+      "finish_s": 1379,
+      "scope_blocked_job_s": 10116,
+      "resource_blocked_job_s": 2775,
+      "queued_while_placeable_queue_s": 100,
+      "peak_running": 6,
+      "peak_allocated": 6,
+      "per_host": {
+        "worker-00": 128,
+        "worker-01": 112
+      }
+    },
+    {
+      "scenario": "overload",
+      "policy": "current",
+      "seed": 42,
+      "jobs": 240,
+      "P50": 497,
+      "P95": 1011,
+      "Max": 1135,
+      "finish_s": 1284,
+      "scope_blocked_job_s": 76792,
+      "resource_blocked_job_s": 41659,
+      "queued_while_placeable_queue_s": 275,
+      "peak_running": 6,
+      "peak_allocated": 6,
+      "per_host": {
+        "worker-00": 122,
+        "worker-01": 118
+      }
+    },
+    {
+      "scenario": "overload",
+      "policy": "spread",
+      "seed": 42,
+      "jobs": 240,
+      "P50": 499,
+      "P95": 1038,
+      "Max": 1163,
+      "finish_s": 1312,
+      "scope_blocked_job_s": 76855,
+      "resource_blocked_job_s": 42910,
+      "queued_while_placeable_queue_s": 306,
+      "peak_running": 6,
+      "peak_allocated": 6,
+      "per_host": {
+        "worker-00": 122,
+        "worker-01": 118
+      }
+    },
+    {
+      "scenario": "overload",
+      "policy": "round-robin",
+      "seed": 42,
+      "jobs": 240,
+      "P50": 499,
+      "P95": 1028,
+      "Max": 1152,
+      "finish_s": 1301,
+      "scope_blocked_job_s": 76718,
+      "resource_blocked_job_s": 42881,
+      "queued_while_placeable_queue_s": 309,
+      "peak_running": 6,
+      "peak_allocated": 6,
+      "per_host": {
+        "worker-00": 120,
+        "worker-01": 120
+      }
+    },
+    {
+      "scenario": "overload",
+      "policy": "adaptive-warm",
+      "seed": 42,
+      "jobs": 240,
+      "P50": 497,
+      "P95": 1011,
+      "Max": 1135,
+      "finish_s": 1284,
+      "scope_blocked_job_s": 76792,
+      "resource_blocked_job_s": 41659,
+      "queued_while_placeable_queue_s": 275,
+      "peak_running": 6,
+      "peak_allocated": 6,
+      "per_host": {
+        "worker-00": 122,
+        "worker-01": 118
+      }
+    },
+    {
+      "scenario": "overload",
+      "policy": "eager-fill",
+      "seed": 42,
+      "jobs": 240,
+      "P50": 504,
+      "P95": 1019,
+      "Max": 1141,
+      "finish_s": 1290,
+      "scope_blocked_job_s": 76457,
+      "resource_blocked_job_s": 43162,
+      "queued_while_placeable_queue_s": 270,
+      "peak_running": 6,
+      "peak_allocated": 6,
+      "per_host": {
+        "worker-00": 124,
+        "worker-01": 116
+      }
+    },
+    {
+      "scenario": "burst",
+      "policy": "current",
+      "seed": 42,
+      "jobs": 240,
+      "P50": 414,
+      "P95": 792,
+      "Max": 834,
+      "finish_s": 845,
+      "scope_blocked_job_s": 0,
+      "resource_blocked_job_s": 71160,
+      "queued_while_placeable_queue_s": 239,
+      "peak_running": 4,
+      "peak_allocated": 5,
+      "per_host": {
+        "worker-00": 120,
+        "worker-01": 120
+      }
+    },
+    {
+      "scenario": "burst",
+      "policy": "spread",
+      "seed": 42,
+      "jobs": 240,
+      "P50": 414,
+      "P95": 792,
+      "Max": 834,
+      "finish_s": 845,
+      "scope_blocked_job_s": 0,
+      "resource_blocked_job_s": 71160,
+      "queued_while_placeable_queue_s": 239,
+      "peak_running": 4,
+      "peak_allocated": 5,
+      "per_host": {
+        "worker-00": 120,
+        "worker-01": 120
+      }
+    },
+    {
+      "scenario": "burst",
+      "policy": "round-robin",
+      "seed": 42,
+      "jobs": 240,
+      "P50": 414,
+      "P95": 792,
+      "Max": 834,
+      "finish_s": 845,
+      "scope_blocked_job_s": 0,
+      "resource_blocked_job_s": 71160,
+      "queued_while_placeable_queue_s": 239,
+      "peak_running": 4,
+      "peak_allocated": 5,
+      "per_host": {
+        "worker-00": 120,
+        "worker-01": 120
+      }
+    },
+    {
+      "scenario": "burst",
+      "policy": "adaptive-warm",
+      "seed": 42,
+      "jobs": 240,
+      "P50": 414,
+      "P95": 792,
+      "Max": 834,
+      "finish_s": 845,
+      "scope_blocked_job_s": 0,
+      "resource_blocked_job_s": 71160,
+      "queued_while_placeable_queue_s": 239,
+      "peak_running": 4,
+      "peak_allocated": 5,
+      "per_host": {
+        "worker-00": 120,
+        "worker-01": 120
+      }
+    },
+    {
+      "scenario": "burst",
+      "policy": "eager-fill",
+      "seed": 42,
+      "jobs": 240,
+      "P50": 412,
+      "P95": 790,
+      "Max": 832,
+      "finish_s": 843,
+      "scope_blocked_job_s": 0,
+      "resource_blocked_job_s": 85678,
+      "queued_while_placeable_queue_s": 118,
+      "peak_running": 4,
+      "peak_allocated": 6,
+      "per_host": {
+        "worker-00": 120,
+        "worker-01": 120
+      }
+    },
+    {
+      "scenario": "heterogeneous",
+      "policy": "current",
+      "seed": 42,
+      "jobs": 240,
+      "P50": 14,
+      "P95": 63,
+      "Max": 102,
+      "finish_s": 1256,
+      "scope_blocked_job_s": 4117,
+      "resource_blocked_job_s": 727,
+      "queued_while_placeable_queue_s": 71,
+      "peak_running": 6,
+      "peak_allocated": 6,
+      "per_host": {
+        "worker-00": 133,
+        "worker-01": 107
+      }
+    },
+    {
+      "scenario": "heterogeneous",
+      "policy": "spread",
+      "seed": 42,
+      "jobs": 240,
+      "P50": 14,
+      "P95": 72,
+      "Max": 104,
+      "finish_s": 1256,
+      "scope_blocked_job_s": 4243,
+      "resource_blocked_job_s": 833,
+      "queued_while_placeable_queue_s": 86,
+      "peak_running": 6,
+      "peak_allocated": 6,
+      "per_host": {
+        "worker-00": 133,
+        "worker-01": 107
+      }
+    },
+    {
+      "scenario": "heterogeneous",
+      "policy": "round-robin",
+      "seed": 42,
+      "jobs": 240,
+      "P50": 19,
+      "P95": 88,
+      "Max": 117,
+      "finish_s": 1262,
+      "scope_blocked_job_s": 5751,
+      "resource_blocked_job_s": 1134,
+      "queued_while_placeable_queue_s": 103,
+      "peak_running": 6,
+      "peak_allocated": 6,
+      "per_host": {
+        "worker-00": 126,
+        "worker-01": 114
+      }
+    },
+    {
+      "scenario": "heterogeneous",
+      "policy": "adaptive-warm",
+      "seed": 42,
+      "jobs": 240,
+      "P50": 15,
+      "P95": 63,
+      "Max": 102,
+      "finish_s": 1256,
+      "scope_blocked_job_s": 4330,
+      "resource_blocked_job_s": 753,
+      "queued_while_placeable_queue_s": 70,
+      "peak_running": 6,
+      "peak_allocated": 6,
+      "per_host": {
+        "worker-00": 134,
+        "worker-01": 106
+      }
+    },
+    {
+      "scenario": "heterogeneous",
+      "policy": "eager-fill",
+      "seed": 42,
+      "jobs": 240,
+      "P50": 13,
+      "P95": 55,
+      "Max": 93,
+      "finish_s": 1254,
+      "scope_blocked_job_s": 3971,
+      "resource_blocked_job_s": 565,
+      "queued_while_placeable_queue_s": 60,
+      "peak_running": 6,
+      "peak_allocated": 6,
+      "per_host": {
+        "worker-00": 134,
+        "worker-01": 106
+      }
+    },
+    {
+      "scenario": "outage",
+      "policy": "current",
+      "seed": 42,
+      "jobs": 240,
+      "P50": 50,
+      "P95": 179,
+      "Max": 205,
+      "finish_s": 1357,
+      "scope_blocked_job_s": 12010,
+      "resource_blocked_job_s": 3653,
+      "queued_while_placeable_queue_s": 132,
+      "peak_running": 6,
+      "peak_allocated": 6,
+      "per_host": {
+        "worker-00": 123,
+        "worker-01": 117
+      }
+    },
+    {
+      "scenario": "outage",
+      "policy": "spread",
+      "seed": 42,
+      "jobs": 240,
+      "P50": 52,
+      "P95": 176,
+      "Max": 211,
+      "finish_s": 1345,
+      "scope_blocked_job_s": 11888,
+      "resource_blocked_job_s": 3804,
+      "queued_while_placeable_queue_s": 153,
+      "peak_running": 6,
+      "peak_allocated": 6,
+      "per_host": {
+        "worker-00": 120,
+        "worker-01": 120
+      }
+    },
+    {
+      "scenario": "outage",
+      "policy": "round-robin",
+      "seed": 42,
+      "jobs": 240,
+      "P50": 50,
+      "P95": 179,
+      "Max": 205,
+      "finish_s": 1357,
+      "scope_blocked_job_s": 12010,
+      "resource_blocked_job_s": 3653,
+      "queued_while_placeable_queue_s": 132,
+      "peak_running": 6,
+      "peak_allocated": 6,
+      "per_host": {
+        "worker-00": 120,
+        "worker-01": 120
+      }
+    },
+    {
+      "scenario": "outage",
+      "policy": "adaptive-warm",
+      "seed": 42,
+      "jobs": 240,
+      "P50": 50,
+      "P95": 179,
+      "Max": 205,
+      "finish_s": 1357,
+      "scope_blocked_job_s": 12010,
+      "resource_blocked_job_s": 3653,
+      "queued_while_placeable_queue_s": 132,
+      "peak_running": 6,
+      "peak_allocated": 6,
+      "per_host": {
+        "worker-00": 123,
+        "worker-01": 117
+      }
+    },
+    {
+      "scenario": "outage",
+      "policy": "eager-fill",
+      "seed": 42,
+      "jobs": 240,
+      "P50": 50,
+      "P95": 179,
+      "Max": 201,
+      "finish_s": 1351,
+      "scope_blocked_job_s": 11952,
+      "resource_blocked_job_s": 3646,
+      "queued_while_placeable_queue_s": 122,
+      "peak_running": 6,
+      "peak_allocated": 6,
+      "per_host": {
+        "worker-00": 124,
+        "worker-01": 116
+      }
+    },
+    {
+      "scenario": "drain",
+      "policy": "current",
+      "seed": 42,
+      "jobs": 240,
+      "P50": 458,
+      "P95": 1123,
+      "Max": 1181,
+      "finish_s": 2322,
+      "scope_blocked_job_s": 39974,
+      "resource_blocked_job_s": 78825,
+      "queued_while_placeable_queue_s": 413,
+      "peak_running": 4,
+      "peak_allocated": 4,
+      "per_host": {
+        "worker-00": 8,
+        "worker-01": 232
+      }
+    },
+    {
+      "scenario": "drain",
+      "policy": "spread",
+      "seed": 42,
+      "jobs": 240,
+      "P50": 458,
+      "P95": 1123,
+      "Max": 1181,
+      "finish_s": 2322,
+      "scope_blocked_job_s": 39974,
+      "resource_blocked_job_s": 78825,
+      "queued_while_placeable_queue_s": 413,
+      "peak_running": 4,
+      "peak_allocated": 4,
+      "per_host": {
+        "worker-00": 7,
+        "worker-01": 233
+      }
+    },
+    {
+      "scenario": "drain",
+      "policy": "round-robin",
+      "seed": 42,
+      "jobs": 240,
+      "P50": 458,
+      "P95": 1123,
+      "Max": 1181,
+      "finish_s": 2322,
+      "scope_blocked_job_s": 39974,
+      "resource_blocked_job_s": 78825,
+      "queued_while_placeable_queue_s": 413,
+      "peak_running": 4,
+      "peak_allocated": 4,
+      "per_host": {
+        "worker-00": 6,
+        "worker-01": 234
+      }
+    },
+    {
+      "scenario": "drain",
+      "policy": "adaptive-warm",
+      "seed": 42,
+      "jobs": 240,
+      "P50": 458,
+      "P95": 1123,
+      "Max": 1181,
+      "finish_s": 2322,
+      "scope_blocked_job_s": 39974,
+      "resource_blocked_job_s": 78825,
+      "queued_while_placeable_queue_s": 413,
+      "peak_running": 4,
+      "peak_allocated": 4,
+      "per_host": {
+        "worker-00": 8,
+        "worker-01": 232
+      }
+    },
+    {
+      "scenario": "drain",
+      "policy": "eager-fill",
+      "seed": 42,
+      "jobs": 240,
+      "P50": 458,
+      "P95": 1123,
+      "Max": 1181,
+      "finish_s": 2322,
+      "scope_blocked_job_s": 39384,
+      "resource_blocked_job_s": 79415,
+      "queued_while_placeable_queue_s": 413,
+      "peak_running": 4,
+      "peak_allocated": 4,
+      "per_host": {
+        "worker-00": 8,
+        "worker-01": 232
+      }
+    },
+    {
+      "scenario": "mixed",
+      "policy": "current",
+      "seed": 42,
+      "jobs": 240,
+      "P50": 78,
+      "P95": 866,
+      "Max": 1107,
+      "finish_s": 2040,
+      "scope_blocked_job_s": 24841,
+      "resource_blocked_job_s": 41337,
+      "queued_while_placeable_queue_s": 5,
+      "peak_running": 5,
+      "peak_allocated": 5,
+      "per_host": {
+        "worker-00": 118,
+        "worker-01": 122
+      }
+    },
+    {
+      "scenario": "mixed",
+      "policy": "spread",
+      "seed": 42,
+      "jobs": 240,
+      "P50": 93,
+      "P95": 861,
+      "Max": 959,
+      "finish_s": 2070,
+      "scope_blocked_job_s": 25580,
+      "resource_blocked_job_s": 41249,
+      "queued_while_placeable_queue_s": 8,
+      "peak_running": 5,
+      "peak_allocated": 5,
+      "per_host": {
+        "worker-00": 123,
+        "worker-01": 117
+      }
+    },
+    {
+      "scenario": "mixed",
+      "policy": "round-robin",
+      "seed": 42,
+      "jobs": 240,
+      "P50": 91,
+      "P95": 888,
+      "Max": 995,
+      "finish_s": 2085,
+      "scope_blocked_job_s": 26285,
+      "resource_blocked_job_s": 41053,
+      "queued_while_placeable_queue_s": 10,
+      "peak_running": 5,
+      "peak_allocated": 5,
+      "per_host": {
+        "worker-00": 119,
+        "worker-01": 121
+      }
+    },
+    {
+      "scenario": "mixed",
+      "policy": "adaptive-warm",
+      "seed": 42,
+      "jobs": 240,
+      "P50": 163,
+      "P95": 727,
+      "Max": 922,
+      "finish_s": 1940,
+      "scope_blocked_job_s": 23956,
+      "resource_blocked_job_s": 36403,
+      "queued_while_placeable_queue_s": 72,
+      "peak_running": 5,
+      "peak_allocated": 5,
+      "per_host": {
+        "worker-00": 115,
+        "worker-01": 125
+      }
+    },
+    {
+      "scenario": "mixed",
+      "policy": "eager-fill",
+      "seed": 42,
+      "jobs": 240,
+      "P50": 75,
+      "P95": 918,
+      "Max": 1189,
+      "finish_s": 2086,
+      "scope_blocked_job_s": 25271,
+      "resource_blocked_job_s": 42562,
+      "queued_while_placeable_queue_s": 6,
+      "peak_running": 5,
+      "peak_allocated": 5,
+      "per_host": {
+        "worker-00": 121,
+        "worker-01": 119
+      }
+    },
+    {
+      "scenario": "label-fairness",
+      "policy": "current",
+      "seed": 42,
+      "jobs": 240,
+      "P50": 412,
+      "P95": 790,
+      "Max": 832,
+      "finish_s": 843,
+      "scope_blocked_job_s": 0,
+      "resource_blocked_job_s": 85674,
+      "queued_while_placeable_queue_s": 1019,
+      "peak_running": 4,
+      "peak_allocated": 6,
+      "per_host": {
+        "worker-00": 120,
+        "worker-01": 120
+      }
+    },
+    {
+      "scenario": "label-fairness",
+      "policy": "spread",
+      "seed": 42,
+      "jobs": 240,
+      "P50": 412,
+      "P95": 790,
+      "Max": 832,
+      "finish_s": 843,
+      "scope_blocked_job_s": 0,
+      "resource_blocked_job_s": 85674,
+      "queued_while_placeable_queue_s": 1019,
+      "peak_running": 4,
+      "peak_allocated": 6,
+      "per_host": {
+        "worker-00": 120,
+        "worker-01": 120
+      }
+    },
+    {
+      "scenario": "label-fairness",
+      "policy": "round-robin",
+      "seed": 42,
+      "jobs": 240,
+      "P50": 412,
+      "P95": 790,
+      "Max": 832,
+      "finish_s": 843,
+      "scope_blocked_job_s": 0,
+      "resource_blocked_job_s": 85674,
+      "queued_while_placeable_queue_s": 1019,
+      "peak_running": 4,
+      "peak_allocated": 6,
+      "per_host": {
+        "worker-00": 120,
+        "worker-01": 120
+      }
+    },
+    {
+      "scenario": "label-fairness",
+      "policy": "adaptive-warm",
+      "seed": 42,
+      "jobs": 240,
+      "P50": 412,
+      "P95": 790,
+      "Max": 832,
+      "finish_s": 843,
+      "scope_blocked_job_s": 0,
+      "resource_blocked_job_s": 85674,
+      "queued_while_placeable_queue_s": 1019,
+      "peak_running": 4,
+      "peak_allocated": 6,
+      "per_host": {
+        "worker-00": 120,
+        "worker-01": 120
+      }
+    },
+    {
+      "scenario": "label-fairness",
+      "policy": "eager-fill",
+      "seed": 42,
+      "jobs": 240,
+      "P50": 412,
+      "P95": 790,
+      "Max": 832,
+      "finish_s": 843,
+      "scope_blocked_job_s": 0,
+      "resource_blocked_job_s": 85680,
+      "queued_while_placeable_queue_s": 1018,
+      "peak_running": 4,
+      "peak_allocated": 6,
+      "per_host": {
+        "worker-00": 120,
+        "worker-01": 120
+      }
+    },
+    {
+      "scenario": "scale",
+      "policy": "current",
+      "seed": 42,
+      "jobs": 1000,
+      "P50": 110,
+      "P95": 326,
+      "Max": 435,
+      "finish_s": 1040,
+      "scope_blocked_job_s": 109860,
+      "resource_blocked_job_s": 13891,
+      "queued_while_placeable_queue_s": 661,
+      "peak_running": 30,
+      "peak_allocated": 31,
+      "per_host": {
+        "worker-00": 72,
+        "worker-01": 72,
+        "worker-02": 68,
+        "worker-03": 68,
+        "worker-04": 69,
+        "worker-05": 61,
+        "worker-06": 62,
+        "worker-07": 63,
+        "worker-08": 64,
+        "worker-09": 62,
+        "worker-10": 60,
+        "worker-11": 60,
+        "worker-12": 56,
+        "worker-13": 57,
+        "worker-14": 54,
+        "worker-15": 52
+      }
+    },
+    {
+      "scenario": "scale",
+      "policy": "spread",
+      "seed": 42,
+      "jobs": 1000,
+      "P50": 106,
+      "P95": 328,
+      "Max": 442,
+      "finish_s": 1047,
+      "scope_blocked_job_s": 109342,
+      "resource_blocked_job_s": 13756,
+      "queued_while_placeable_queue_s": 670,
+      "peak_running": 30,
+      "peak_allocated": 31,
+      "per_host": {
+        "worker-00": 72,
+        "worker-01": 69,
+        "worker-02": 65,
+        "worker-03": 68,
+        "worker-04": 64,
+        "worker-05": 68,
+        "worker-06": 63,
+        "worker-07": 61,
+        "worker-08": 61,
+        "worker-09": 59,
+        "worker-10": 63,
+        "worker-11": 59,
+        "worker-12": 60,
+        "worker-13": 57,
+        "worker-14": 52,
+        "worker-15": 59
+      }
+    },
+    {
+      "scenario": "scale",
+      "policy": "round-robin",
+      "seed": 42,
+      "jobs": 1000,
+      "P50": 108,
+      "P95": 320,
+      "Max": 443,
+      "finish_s": 1048,
+      "scope_blocked_job_s": 109092,
+      "resource_blocked_job_s": 14343,
+      "queued_while_placeable_queue_s": 601,
+      "peak_running": 30,
+      "peak_allocated": 31,
+      "per_host": {
+        "worker-00": 63,
+        "worker-01": 63,
+        "worker-02": 63,
+        "worker-03": 63,
+        "worker-04": 63,
+        "worker-05": 63,
+        "worker-06": 63,
+        "worker-07": 63,
+        "worker-08": 62,
+        "worker-09": 62,
+        "worker-10": 62,
+        "worker-11": 62,
+        "worker-12": 62,
+        "worker-13": 62,
+        "worker-14": 62,
+        "worker-15": 62
+      }
+    },
+    {
+      "scenario": "scale",
+      "policy": "adaptive-warm",
+      "seed": 42,
+      "jobs": 1000,
+      "P50": 109,
+      "P95": 330,
+      "Max": 446,
+      "finish_s": 1054,
+      "scope_blocked_job_s": 110047,
+      "resource_blocked_job_s": 14068,
+      "queued_while_placeable_queue_s": 757,
+      "peak_running": 30,
+      "peak_allocated": 30,
+      "per_host": {
+        "worker-00": 77,
+        "worker-01": 72,
+        "worker-02": 75,
+        "worker-03": 68,
+        "worker-04": 68,
+        "worker-05": 62,
+        "worker-06": 63,
+        "worker-07": 60,
+        "worker-08": 59,
+        "worker-09": 60,
+        "worker-10": 56,
+        "worker-11": 59,
+        "worker-12": 57,
+        "worker-13": 56,
+        "worker-14": 55,
+        "worker-15": 53
+      }
+    },
+    {
+      "scenario": "scale",
+      "policy": "eager-fill",
+      "seed": 42,
+      "jobs": 1000,
+      "P50": 106,
+      "P95": 314,
+      "Max": 437,
+      "finish_s": 1042,
+      "scope_blocked_job_s": 107013,
+      "resource_blocked_job_s": 16188,
+      "queued_while_placeable_queue_s": 288,
+      "peak_running": 30,
+      "peak_allocated": 32,
+      "per_host": {
+        "worker-00": 72,
+        "worker-01": 67,
+        "worker-02": 68,
+        "worker-03": 66,
+        "worker-04": 67,
+        "worker-05": 65,
+        "worker-06": 66,
+        "worker-07": 63,
+        "worker-08": 59,
+        "worker-09": 61,
+        "worker-10": 56,
+        "worker-11": 59,
+        "worker-12": 60,
+        "worker-13": 61,
+        "worker-14": 56,
+        "worker-15": 54
+      }
+    }
+  ],
+  "sensitivity": [
+    {
+      "scenario": "low",
+      "policy": "current",
+      "seed": 43,
+      "jobs": 240,
+      "P50": 0,
+      "P95": 27,
+      "Max": 57,
+      "finish_s": 2408,
+      "peak_running": 5,
+      "peak_allocated": 5,
+      "per_host": {
+        "worker-00": 158,
+        "worker-01": 82
+      }
+    },
+    {
+      "scenario": "low",
+      "policy": "spread",
+      "seed": 43,
+      "jobs": 240,
+      "P50": 0,
+      "P95": 26,
+      "Max": 60,
+      "finish_s": 2408,
+      "peak_running": 5,
+      "peak_allocated": 5,
+      "per_host": {
+        "worker-00": 142,
+        "worker-01": 98
+      }
+    },
+    {
+      "scenario": "low",
+      "policy": "round-robin",
+      "seed": 43,
+      "jobs": 240,
+      "P50": 0,
+      "P95": 27,
+      "Max": 57,
+      "finish_s": 2408,
+      "peak_running": 5,
+      "peak_allocated": 5,
+      "per_host": {
+        "worker-00": 120,
+        "worker-01": 120
+      }
+    },
+    {
+      "scenario": "low",
+      "policy": "adaptive-warm",
+      "seed": 43,
+      "jobs": 240,
+      "P50": 0,
+      "P95": 27,
+      "Max": 57,
+      "finish_s": 2408,
+      "peak_running": 5,
+      "peak_allocated": 5,
+      "per_host": {
+        "worker-00": 158,
+        "worker-01": 82
+      }
+    },
+    {
+      "scenario": "low",
+      "policy": "eager-fill",
+      "seed": 43,
+      "jobs": 240,
+      "P50": 0,
+      "P95": 27,
+      "Max": 57,
+      "finish_s": 2408,
+      "peak_running": 5,
+      "peak_allocated": 5,
+      "per_host": {
+        "worker-00": 158,
+        "worker-01": 82
+      }
+    },
+    {
+      "scenario": "near-capacity",
+      "policy": "current",
+      "seed": 43,
+      "jobs": 240,
+      "P50": 15,
+      "P95": 158,
+      "Max": 207,
+      "finish_s": 1241,
+      "peak_running": 6,
+      "peak_allocated": 6,
+      "per_host": {
+        "worker-00": 120,
+        "worker-01": 120
+      }
+    },
+    {
+      "scenario": "near-capacity",
+      "policy": "spread",
+      "seed": 43,
+      "jobs": 240,
+      "P50": 17,
+      "P95": 154,
+      "Max": 207,
+      "finish_s": 1252,
+      "peak_running": 6,
+      "peak_allocated": 6,
+      "per_host": {
+        "worker-00": 123,
+        "worker-01": 117
+      }
+    },
+    {
+      "scenario": "near-capacity",
+      "policy": "round-robin",
+      "seed": 43,
+      "jobs": 240,
+      "P50": 16,
+      "P95": 147,
+      "Max": 210,
+      "finish_s": 1246,
+      "peak_running": 6,
+      "peak_allocated": 6,
+      "per_host": {
+        "worker-00": 120,
+        "worker-01": 120
+      }
+    },
+    {
+      "scenario": "near-capacity",
+      "policy": "adaptive-warm",
+      "seed": 43,
+      "jobs": 240,
+      "P50": 15,
+      "P95": 158,
+      "Max": 207,
+      "finish_s": 1241,
+      "peak_running": 6,
+      "peak_allocated": 6,
+      "per_host": {
+        "worker-00": 120,
+        "worker-01": 120
+      }
+    },
+    {
+      "scenario": "near-capacity",
+      "policy": "eager-fill",
+      "seed": 43,
+      "jobs": 240,
+      "P50": 17,
+      "P95": 137,
+      "Max": 180,
+      "finish_s": 1235,
+      "peak_running": 6,
+      "peak_allocated": 6,
+      "per_host": {
+        "worker-00": 120,
+        "worker-01": 120
+      }
+    },
+    {
+      "scenario": "mixed",
+      "policy": "current",
+      "seed": 43,
+      "jobs": 240,
+      "P50": 132,
+      "P95": 846,
+      "Max": 1033,
+      "finish_s": 1966,
+      "peak_running": 5,
+      "peak_allocated": 5,
+      "per_host": {
+        "worker-00": 119,
+        "worker-01": 121
+      }
+    },
+    {
+      "scenario": "mixed",
+      "policy": "spread",
+      "seed": 43,
+      "jobs": 240,
+      "P50": 132,
+      "P95": 850,
+      "Max": 1021,
+      "finish_s": 1972,
+      "peak_running": 5,
+      "peak_allocated": 5,
+      "per_host": {
+        "worker-00": 119,
+        "worker-01": 121
+      }
+    },
+    {
+      "scenario": "mixed",
+      "policy": "round-robin",
+      "seed": 43,
+      "jobs": 240,
+      "P50": 132,
+      "P95": 848,
+      "Max": 1019,
+      "finish_s": 1970,
+      "peak_running": 5,
+      "peak_allocated": 5,
+      "per_host": {
+        "worker-00": 118,
+        "worker-01": 122
+      }
+    },
+    {
+      "scenario": "mixed",
+      "policy": "adaptive-warm",
+      "seed": 43,
+      "jobs": 240,
+      "P50": 114,
+      "P95": 639,
+      "Max": 767,
+      "finish_s": 1828,
+      "peak_running": 5,
+      "peak_allocated": 5,
+      "per_host": {
+        "worker-00": 126,
+        "worker-01": 114
+      }
+    },
+    {
+      "scenario": "mixed",
+      "policy": "eager-fill",
+      "seed": 43,
+      "jobs": 240,
+      "P50": 128,
+      "P95": 782,
+      "Max": 940,
+      "finish_s": 1919,
+      "peak_running": 5,
+      "peak_allocated": 5,
+      "per_host": {
+        "worker-00": 120,
+        "worker-01": 120
+      }
+    },
+    {
+      "scenario": "low",
+      "policy": "current",
+      "seed": 44,
+      "jobs": 240,
+      "P50": 0,
+      "P95": 20,
+      "Max": 59,
+      "finish_s": 2422,
+      "peak_running": 6,
+      "peak_allocated": 6,
+      "per_host": {
+        "worker-00": 156,
+        "worker-01": 84
+      }
+    },
+    {
+      "scenario": "low",
+      "policy": "spread",
+      "seed": 44,
+      "jobs": 240,
+      "P50": 0,
+      "P95": 20,
+      "Max": 49,
+      "finish_s": 2422,
+      "peak_running": 6,
+      "peak_allocated": 6,
+      "per_host": {
+        "worker-00": 130,
+        "worker-01": 110
+      }
+    },
+    {
+      "scenario": "low",
+      "policy": "round-robin",
+      "seed": 44,
+      "jobs": 240,
+      "P50": 0,
+      "P95": 20,
+      "Max": 58,
+      "finish_s": 2422,
+      "peak_running": 6,
+      "peak_allocated": 6,
+      "per_host": {
+        "worker-00": 120,
+        "worker-01": 120
+      }
+    },
+    {
+      "scenario": "low",
+      "policy": "adaptive-warm",
+      "seed": 44,
+      "jobs": 240,
+      "P50": 0,
+      "P95": 20,
+      "Max": 59,
+      "finish_s": 2422,
+      "peak_running": 6,
+      "peak_allocated": 6,
+      "per_host": {
+        "worker-00": 156,
+        "worker-01": 84
+      }
+    },
+    {
+      "scenario": "low",
+      "policy": "eager-fill",
+      "seed": 44,
+      "jobs": 240,
+      "P50": 0,
+      "P95": 20,
+      "Max": 59,
+      "finish_s": 2422,
+      "peak_running": 6,
+      "peak_allocated": 6,
+      "per_host": {
+        "worker-00": 156,
+        "worker-01": 84
+      }
+    },
+    {
+      "scenario": "near-capacity",
+      "policy": "current",
+      "seed": 44,
+      "jobs": 240,
+      "P50": 16,
+      "P95": 110,
+      "Max": 159,
+      "finish_s": 1241,
+      "peak_running": 6,
+      "peak_allocated": 6,
+      "per_host": {
+        "worker-00": 125,
+        "worker-01": 115
+      }
+    },
+    {
+      "scenario": "near-capacity",
+      "policy": "spread",
+      "seed": 44,
+      "jobs": 240,
+      "P50": 18,
+      "P95": 168,
+      "Max": 239,
+      "finish_s": 1241,
+      "peak_running": 6,
+      "peak_allocated": 6,
+      "per_host": {
+        "worker-00": 120,
+        "worker-01": 120
+      }
+    },
+    {
+      "scenario": "near-capacity",
+      "policy": "round-robin",
+      "seed": 44,
+      "jobs": 240,
+      "P50": 18,
+      "P95": 168,
+      "Max": 239,
+      "finish_s": 1241,
+      "peak_running": 6,
+      "peak_allocated": 6,
+      "per_host": {
+        "worker-00": 120,
+        "worker-01": 120
+      }
+    },
+    {
+      "scenario": "near-capacity",
+      "policy": "adaptive-warm",
+      "seed": 44,
+      "jobs": 240,
+      "P50": 18,
+      "P95": 114,
+      "Max": 181,
+      "finish_s": 1241,
+      "peak_running": 6,
+      "peak_allocated": 6,
+      "per_host": {
+        "worker-00": 127,
+        "worker-01": 113
+      }
+    },
+    {
+      "scenario": "near-capacity",
+      "policy": "eager-fill",
+      "seed": 44,
+      "jobs": 240,
+      "P50": 19,
+      "P95": 120,
+      "Max": 182,
+      "finish_s": 1241,
+      "peak_running": 6,
+      "peak_allocated": 6,
+      "per_host": {
+        "worker-00": 123,
+        "worker-01": 117
+      }
+    },
+    {
+      "scenario": "mixed",
+      "policy": "current",
+      "seed": 44,
+      "jobs": 240,
+      "P50": 131,
+      "P95": 813,
+      "Max": 910,
+      "finish_s": 1963,
+      "peak_running": 5,
+      "peak_allocated": 5,
+      "per_host": {
+        "worker-00": 121,
+        "worker-01": 119
+      }
+    },
+    {
+      "scenario": "mixed",
+      "policy": "spread",
+      "seed": 44,
+      "jobs": 240,
+      "P50": 131,
+      "P95": 813,
+      "Max": 910,
+      "finish_s": 1963,
+      "peak_running": 5,
+      "peak_allocated": 5,
+      "per_host": {
+        "worker-00": 121,
+        "worker-01": 119
+      }
+    },
+    {
+      "scenario": "mixed",
+      "policy": "round-robin",
+      "seed": 44,
+      "jobs": 240,
+      "P50": 116,
+      "P95": 906,
+      "Max": 1031,
+      "finish_s": 1987,
+      "peak_running": 5,
+      "peak_allocated": 5,
+      "per_host": {
+        "worker-00": 122,
+        "worker-01": 118
+      }
+    },
+    {
+      "scenario": "mixed",
+      "policy": "adaptive-warm",
+      "seed": 44,
+      "jobs": 240,
+      "P50": 118,
+      "P95": 808,
+      "Max": 890,
+      "finish_s": 1858,
+      "peak_running": 5,
+      "peak_allocated": 5,
+      "per_host": {
+        "worker-00": 118,
+        "worker-01": 122
+      }
+    },
+    {
+      "scenario": "mixed",
+      "policy": "eager-fill",
+      "seed": 44,
+      "jobs": 240,
+      "P50": 131,
+      "P95": 813,
+      "Max": 910,
+      "finish_s": 1963,
+      "peak_running": 5,
+      "peak_allocated": 5,
+      "per_host": {
+        "worker-00": 121,
+        "worker-01": 119
+      }
+    }
+  ]
+}

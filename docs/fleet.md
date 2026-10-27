@@ -22,6 +22,9 @@ The image digest is SHA256 of the immutable bundle's SHA256SUMS bytes. Workers
 verify every listed file, machine and disk shape before serving. Runner labels
 resolve to content and resource shape; they never choose a physical host.
 
+For offline placement experiments, scaling findings and alternative policies, see
+[the scheduler simulation study](scheduler-simulation.md).
+
 The scheduler prefers compatible READY guests, then eligible cold capacity.
 Each private worker configuration may set `placement_priority` to an integer
 from -100 to 100 (default 0). Higher values prefer that worker among eligible
