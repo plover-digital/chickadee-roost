@@ -66,7 +66,7 @@ enable encrypted credential storage. See [agent access](docs/agent-api.md).
 
 ## Build and test
 
-Use Go 1.26.10 for the reference build and Python 3 for the operator scripts.
+Use Go 1.26.11 for the reference build and Python 3 for the operator scripts.
 The Go web package has no external module dependencies. Python scripts use the
 standard library; operational App signing also requires OpenSSL.
 
