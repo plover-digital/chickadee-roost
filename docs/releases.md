@@ -1,14 +1,19 @@
 # Release security checks and rollout
 
-The reference toolchain and minimum module version are Go 1.26.10. The Makefile
-pins `GOTOOLCHAIN=go1.26.10`; CI installs that exact release. Update these together
+The reference toolchain and minimum module version are Go 1.26.11. The Makefile
+pins `GOTOOLCHAIN=go1.26.11`; CI installs that exact release. Update these together
 with `go.mod`, the metadata validator and README when reviewing a newer baseline.
 The pinned scanner is `golang.org/x/vuln/cmd/govulncheck@v1.9.0`.
 
-On 2026-10-21, the [official release history](https://go.dev/doc/devel/release)
-listed 1.26.10 and 1.27.3 as patched supported releases.
-[GO-2026-6617](https://pkg.go.dev/vuln/GO-2026-6617) includes the HTTP/2 server
-HPACK race fix in those releases. Keeping the 1.26 line limits upgrade scope.
+On 2026-11-15, the [official release history](https://go.dev/doc/devel/release)
+listed 1.26.11 and 1.27.4 as patched supported releases. They fix
+[GO-2026-6859](https://pkg.go.dev/vuln/GO-2026-6859): an HTTP/1 server using
+`MaxBytesReader` can crash when its handler reads the body while writing response
+headers. The website is directly affected: its HTTP/1 handlers decode bodies
+through `MaxBytesReader`. Rebuild and redeploy both binaries, because govulncheck
+also reports the broker's net/http client use. Earlier, 1.26.10 and 1.27.3 were
+the patched releases; [GO-2026-6617](https://pkg.go.dev/vuln/GO-2026-6617) includes
+the HTTP/2 server HPACK race fix in 1.26.10/1.27.3 and later. Keeping the 1.26 line limits upgrade scope.
 Always recheck release notes and the vulnerability database before deployment.
 
 ## Build and verify
@@ -109,12 +114,13 @@ trusts them. Rebuild both the broker and website. Existing deployments using a
 historical accepted application must rebuild that exact source and dependency
 graph; current-main release artifacts are not a substitute for that provenance.
 The historical broker recipe retains its original Go 1.26.3 reproduction step
-and now compiles its candidate with Go 1.26.10. No protocol, configuration, journal
+and now compiles its candidate with Go 1.26.11 (GO-2026-6859). Operators need a
+newly reviewed recipe revision, because the recipe's provenance changes. No protocol, configuration, journal
 format or deployment ordering changes are introduced. Deployments remain an
 operator-controlled action after concrete build and vulnerability evidence.
 
-Make entrypoints use an override export for exact Go 1.26.10, including when
+Make entrypoints use an override export for exact Go 1.26.11, including when
 `GOTOOLCHAIN=auto` is inherited or passed on the make command line. The module
-minimum/suggested version alone does not reject a newer vulnerable Go 1.27.2.
+minimum/suggested version alone does not reject an older vulnerable 1.27.x such as Go 1.27.3.
 Direct Go callers must explicitly select a patched compiler. The historical
 candidate recipe already selects its exact compiler independently.
