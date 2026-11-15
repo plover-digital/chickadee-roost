@@ -9,10 +9,11 @@ On 2026-11-15, the [official release history](https://go.dev/doc/devel/release)
 listed 1.26.11 and 1.27.4 as patched supported releases. They fix
 [GO-2026-6859](https://pkg.go.dev/vuln/GO-2026-6859): an HTTP/1 server using
 `MaxBytesReader` can crash when its handler reads the body while writing response
-headers. The website handlers decode bodies through `MaxBytesReader`, so rebuild
-and redeploy both binaries. Earlier, 1.26.10 and 1.27.3 were the patched releases.
-[GO-2026-6617](https://pkg.go.dev/vuln/GO-2026-6617) includes the HTTP/2 server
-HPACK race fix in those releases. Keeping the 1.26 line limits upgrade scope.
+headers. The website is directly affected: its HTTP/1 handlers decode bodies
+through `MaxBytesReader`. Rebuild and redeploy both binaries, because govulncheck
+also reports the broker's net/http client use. Earlier, 1.26.10 and 1.27.3 were
+the patched releases; [GO-2026-6617](https://pkg.go.dev/vuln/GO-2026-6617) includes
+the HTTP/2 server HPACK race fix in 1.26.10/1.27.3 and later. Keeping the 1.26 line limits upgrade scope.
 Always recheck release notes and the vulnerability database before deployment.
 
 ## Build and verify
@@ -113,7 +114,8 @@ trusts them. Rebuild both the broker and website. Existing deployments using a
 historical accepted application must rebuild that exact source and dependency
 graph; current-main release artifacts are not a substitute for that provenance.
 The historical broker recipe retains its original Go 1.26.3 reproduction step
-and now compiles its candidate with Go 1.26.10. No protocol, configuration, journal
+and now compiles its candidate with Go 1.26.11 (GO-2026-6859). Operators need a
+newly reviewed recipe revision, because the recipe's provenance changes. No protocol, configuration, journal
 format or deployment ordering changes are introduced. Deployments remain an
 operator-controlled action after concrete build and vulnerability evidence.
 
